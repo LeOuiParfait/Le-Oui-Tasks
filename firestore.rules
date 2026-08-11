@@ -1,0 +1,134 @@
+rules_version = '2';
+
+// Règles Firestore — Le Oui Parfait
+// Application interne mono-organisation avec contrôle basé sur les rôles
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // === Fonctions utilitaires ===
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && getUserData().role in ['super_administrator', 'administrator'];
+    }
+
+    function isManager() {
+      return isSignedIn() && getUserData().role in ['super_administrator', 'administrator', 'manager'];
+    }
+
+    function isTeamLead() {
+      return isSignedIn() && getUserData().role in ['super_administrator', 'administrator', 'manager', 'team_lead'];
+    }
+
+    function belongsToOrganization(orgId) {
+      return isSignedIn() && getUserData().organizationId == orgId;
+    }
+
+    function isSelfOrAdmin(userId) {
+      return isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // === Collections ===
+
+    // Users: lecture pour tous, création/suppression admin seulement, modification self ou admin
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isSelfOrAdmin(userId);
+      allow delete: if isAdmin();
+    }
+
+    // Organizations: lecture pour tous, modification admin seulement
+    match /organizations/{orgId} {
+      allow read: if isSignedIn() && belongsToOrganization(orgId);
+      allow create: if isAdmin();
+      allow update: if isAdmin() && belongsToOrganization(orgId);
+      allow delete: if false; // Jamais supprimer l'organisation
+    }
+
+    // Teams: lecture pour tous, création/modification/suppression manager+
+    match /teams/{teamId} {
+      allow read: if isSignedIn();
+      allow create: if isManager();
+      allow update: if isManager();
+      allow delete: if isManager();
+    }
+
+    // Projects: lecture pour tous, création/modification/suppression manager+
+    match /projects/{projectId} {
+      allow read: if isSignedIn();
+      allow create: if isManager();
+      allow update: if isManager();
+      allow delete: if isManager();
+    }
+
+    // Tasks: lecture pour tous, création team_lead+, modification assigné ou team_lead+
+    match /tasks/{taskId} {
+      allow read: if isSignedIn();
+      allow create: if isTeamLead();
+      allow update: if isSignedIn(); // Tout le monde peut modifier (pour marquer complété, etc.)
+      allow delete: if isTeamLead();
+    }
+
+    // Objectives: lecture pour tous, création/modification/suppression manager+
+    match /objectives/{objectiveId} {
+      allow read: if isSignedIn();
+      allow create: if isManager();
+      allow update: if isManager();
+      allow delete: if isManager();
+    }
+
+    // Attendance: lecture pour tous, création/modification self ou admin
+    match /attendance/{recordId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn(); // Tout le monde peut pointer
+      allow update: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Notifications: lecture/modification self, création système
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Reports: lecture pour tous, création/modification/suppression manager+
+    match /reports/{reportId} {
+      allow read: if isSignedIn();
+      allow create: if isManager();
+      allow update: if isManager();
+      allow delete: if isManager();
+    }
+
+    // Comments: lecture pour tous, création pour tous, modification/suppression auteur ou admin
+    match /comments/{commentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        resource.data.authorId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isSignedIn() && (
+        resource.data.authorId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Audit Logs: lecture admin seulement, création système, jamais de modification/suppression
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #887D93;
+  --color-brand-light: #a89db4;
+  --color-brand-dark: #6b5f78;
+  --color-brand-50: #f5f3f6;
+  --color-brand-100: #ebe7ee;
+  --color-brand-200: #d9d2de;
+  --color-brand-300: #c4b9cc;
+  --color-brand-400: #b0a3ba;
+  --color-brand-500: #887D93;
+}
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Brand display font — Fraunces (modern serif, elegant) */
+.font-brand {
+  font-family: 'Fraunces', Georgia, serif;
+  font-optical-sizing: auto;
+}
+
+/* Custom scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Refined scrollbar for main content areas */
+.refined-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.refined-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.refined-scrollbar::-webkit-scrollbar-thumb {
+  background: #d6d3d1;
+  border-radius: 3px;
+}
+.refined-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #a8a29e;
+}
+
+/* Base form input — used across all modals */
+.form-input-base {
+  width: 100%;
+  border: 1px solid #e7e5e4;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  color: #1c1917;
+  background: white;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+.form-input-base:focus {
+  border-color: #887D93;
+  box-shadow: 0 0 0 3px rgba(136, 125, 147, 0.12);
+}
+.form-input-base::placeholder {
+  color: #a8a29e;
+}
