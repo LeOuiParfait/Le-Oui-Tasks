@@ -1,10 +1,14 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
+import fs from 'fs';
 import dotenv from 'dotenv';
+import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
 import multer from 'multer';
 import { initializeApp as adminInitApp, cert as adminCert } from 'firebase-admin/app';
+import { getAuth as adminGetAuth } from 'firebase-admin/auth';
 import { getStorage as adminGetStorage } from 'firebase-admin/storage';
+import { getFirestore as adminGetFirestore } from 'firebase-admin/firestore';
 
 // Augment Express Request with multer's file property
 declare module 'express-serve-static-core' {
@@ -17,6 +21,8 @@ dotenv.config({ path: '.env.local' });
 
 // --- Firebase Admin SDK (server-side, bypasses CORS & security rules) ---
 let adminApp: any = null;
+let adminAuth: any = null;
+let adminFirestore: any = null;
 let adminStorage: any = null;
 
 function getAdminApp() {
@@ -33,8 +39,22 @@ function getAdminApp() {
     credential: adminCert({ projectId, privateKey, clientEmail }),
     storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET
   });
+  adminAuth = adminGetAuth(adminApp);
+  adminFirestore = adminGetFirestore(adminApp);
   adminStorage = adminGetStorage();
   return adminApp;
+}
+
+function getAdminAuth() {
+  if (adminAuth) return adminAuth;
+  getAdminApp();
+  return adminAuth;
+}
+
+function getAdminFirestore() {
+  if (adminFirestore) return adminFirestore;
+  getAdminApp();
+  return adminFirestore;
 }
 
 async function startServer() {
@@ -107,6 +127,193 @@ async function startServer() {
     } catch (error: any) {
       console.error('[Storage] Erreur upload avatar:', error);
       res.status(500).json({ error: error.message || 'Échec de l\'upload.' });
+    }
+  });
+
+  // --- Auth: Generate custom password reset token (100% independent of Firebase UI) ---
+  app.post('/api/auth/reset-link', async (req, res) => {
+    try {
+      const { email, firstName, appName, userId } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: 'Email requis.' });
+      }
+
+      const auth = getAdminAuth();
+      const db = getAdminFirestore();
+      const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+
+      // Resolve Firebase UID for this email if not provided
+      let uid: string = userId;
+      if (!uid) {
+        try {
+          const userRecord = await auth.getUserByEmail(email);
+          uid = userRecord.uid;
+        } catch {
+          return res.status(404).json({ error: 'Aucun utilisateur trouvé avec cet e-mail.' });
+        }
+      }
+
+      // Generate custom token
+      const token = crypto.randomUUID();
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await db.collection('passwordResets').doc(token).set({
+        userId: uid,
+        email,
+        used: false,
+        createdAt: new Date().toISOString(),
+        expiresAt: expiresAt.toISOString()
+      });
+
+      const link = `${appUrl}/reset-password?token=${token}`;
+
+      // Send custom email via SMTP (Gmail) if configured
+      const smtpHost = process.env.SMTP_HOST;
+      const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587;
+      const smtpUser = process.env.SMTP_USER;
+      const smtpPass = process.env.SMTP_PASS;
+      const fromEmail = process.env.FROM_EMAIL || smtpUser;
+
+      let emailSent = false;
+      let emailId: string | null = null;
+
+      if (smtpHost && smtpUser && smtpPass) {
+        try {
+          const transporter = nodemailer.createTransport({
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpPort === 465,
+            auth: {
+              user: smtpUser,
+              pass: smtpPass
+            }
+          });
+
+          const info = await transporter.sendMail({
+            from: `"Le Oui Parfait" <${fromEmail}>`,
+            to: email,
+            subject: `${appName || 'Le Oui Parfait'} — Activez votre compte`,
+            html: `
+              <!DOCTYPE html>
+              <html lang="fr">
+                <body style="margin:0;padding:0;background:#f5f5f4;font-family:Arial,Helvetica,sans-serif;">
+                  <table width="100%" style="background:#f5f5f4;padding:40px 20px;">
+                    <tr><td align="center">
+                      <table width="600" style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,0.08);max-width:600px;width:100%;">
+                        <tr>
+                          <td style="background:linear-gradient(135deg,#0d9488,#0f766e);padding:40px;text-align:center;">
+                            <h1 style="margin:0;color:#fff;font-size:24px;font-weight:700;">${appName || 'Le Oui Parfait'}</h1>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:40px;">
+                            <p style="font-size:16px;color:#44403c;margin:0 0 16px;">Bonjour ${firstName || ''},</p>
+                            <p style="font-size:15px;color:#57534e;line-height:1.7;margin:0 0 24px;">
+                              Votre compte a été créé. Cliquez sur le bouton ci-dessous pour définir votre mot de passe et accéder à votre espace de travail.
+                            </p>
+                            <p style="text-align:center;margin:0 0 32px;">
+                              <a href="${link}" style="background:linear-gradient(135deg,#0d9488,#0f766e);color:#fff;padding:16px 40px;text-decoration:none;border-radius:10px;font-weight:600;display:inline-block;">
+                                Définir mon mot de passe
+                              </a>
+                            </p>
+                            <p style="font-size:13px;color:#78716c;margin:0 0 12px;">
+                              Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :
+                            </p>
+                            <p style="margin:0;word-break:break-all;background:#f5f5f4;border:1px solid #e7e5e4;border-radius:8px;padding:12px;font-size:13px;">
+                              <a href="${link}" style="color:#0f766e;">${link}</a>
+                            </p>
+                          </td>
+                        </tr>
+                      </table>
+                    </td></tr>
+                  </table>
+                </body>
+              </html>
+            `
+          });
+
+          emailSent = true;
+          emailId = info.messageId || null;
+          console.log(`[SMTP] Invitation email sent to ${email}: ${info.messageId}`);
+        } catch (emailErr: any) {
+          console.warn('[SMTP] Failed to send invitation email:', emailErr.message);
+        }
+      }
+
+      res.json({ success: true, link, emailSent, emailId });
+    } catch (error: any) {
+      console.error('[Auth] Error generating reset token:', error);
+      res.status(500).json({ error: error.message || 'Erreur lors de la génération du token.' });
+    }
+  });
+
+  // --- Auth: Validate custom reset token ---
+  app.get('/api/auth/validate-token', async (req, res) => {
+    try {
+      const { token } = req.query;
+      if (!token || typeof token !== 'string') {
+        return res.status(400).json({ error: 'Token requis.' });
+      }
+
+      const db = getAdminFirestore();
+      const tokenDoc = await db.collection('passwordResets').doc(token).get();
+
+      if (!tokenDoc.exists) {
+        return res.status(400).json({ error: 'Lien invalide.' });
+      }
+
+      const data = tokenDoc.data()!;
+      if (data.used) {
+        return res.status(400).json({ error: 'Ce lien a déjà été utilisé.' });
+      }
+      if (new Date(data.expiresAt) < new Date()) {
+        return res.status(400).json({ error: 'Ce lien a expiré.' });
+      }
+
+      res.json({ success: true, email: data.email, userId: data.userId });
+    } catch (error: any) {
+      console.error('[Auth] Error validating token:', error);
+      res.status(500).json({ error: error.message || 'Erreur de validation.' });
+    }
+  });
+  app.post('/api/auth/reset-password', async (req, res) => {
+    try {
+      const { token, newPassword } = req.body;
+      if (!token || !newPassword) {
+        return res.status(400).json({ error: 'Token et mot de passe requis.' });
+      }
+      if (newPassword.length < 6) {
+        return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères.' });
+      }
+
+      const db = getAdminFirestore();
+      const auth = getAdminAuth();
+
+      const tokenRef = db.collection('passwordResets').doc(token);
+      const tokenDoc = await tokenRef.get();
+
+      if (!tokenDoc.exists) {
+        return res.status(400).json({ error: 'Lien invalide.' });
+      }
+
+      const data = tokenDoc.data()!;
+      if (data.used) {
+        return res.status(400).json({ error: 'Ce lien a déjà été utilisé.' });
+      }
+      if (new Date(data.expiresAt) < new Date()) {
+        return res.status(400).json({ error: 'Ce lien a expiré.' });
+      }
+
+      // Update Firebase user password directly
+      await auth.updateUser(data.userId, { password: newPassword });
+
+      // Mark token as used
+      await tokenRef.update({ used: true, usedAt: new Date().toISOString() });
+
+      res.json({ success: true, message: 'Mot de passe mis à jour.' });
+    } catch (error: any) {
+      console.error('[Auth] Error resetting password:', error);
+      res.status(500).json({ error: error.message || 'Erreur lors de la réinitialisation.' });
     }
   });
 
@@ -185,6 +392,22 @@ async function startServer() {
       appType: 'spa'
     });
     app.use(vite.middlewares);
+
+    // SPA fallback: for client-side routes like /reset-password, serve index.html
+    const indexPath = path.join(process.cwd(), 'index.html');
+    app.get('*', async (req, res, next) => {
+      // Skip API routes
+      if (req.url.startsWith('/api/')) return next();
+      // Skip static assets handled by Vite
+      if (req.url.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf|eot|otf)$/)) return next();
+      try {
+        const rawHtml = fs.readFileSync(indexPath, 'utf-8');
+        const html = await vite.transformIndexHtml(req.url, rawHtml);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+      } catch (e) {
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));

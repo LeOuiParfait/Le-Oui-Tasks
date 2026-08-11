@@ -1,134 +1,150 @@
 rules_version = '2';
 
-// Règles Firestore — Le Oui Parfait
-// Application interne mono-organisation avec contrôle basé sur les rôles
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // === Fonctions utilitaires ===
-    
     function isSignedIn() {
       return request.auth != null;
     }
 
+    function getUserId() {
+      return request.auth.uid;
+    }
+
     function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return get(/databases/$(database)/documents/users/$(getUserId())).data;
     }
 
-    function isAdmin() {
-      return isSignedIn() && getUserData().role in ['super_administrator', 'administrator'];
+    function isSuperAdmin() {
+      return isSignedIn() && getUserData().role == 'super_admin';
     }
 
-    function isManager() {
-      return isSignedIn() && getUserData().role in ['super_administrator', 'administrator', 'manager'];
-    }
-
-    function isTeamLead() {
-      return isSignedIn() && getUserData().role in ['super_administrator', 'administrator', 'manager', 'team_lead'];
-    }
-
-    function belongsToOrganization(orgId) {
+    function belongsToOrg(orgId) {
       return isSignedIn() && getUserData().organizationId == orgId;
     }
 
-    function isSelfOrAdmin(userId) {
-      return isSignedIn() && (request.auth.uid == userId || isAdmin());
+    function isProjectMember(projectData) {
+      return projectData.ownerId == getUserId() ||
+             getUserId() in projectData.memberIds;
     }
 
-    // === Collections ===
+    function isProjectEditor(projectData) {
+      return projectData.ownerId == getUserId() ||
+             getUserId() in projectData.ownerIds;
+    }
 
-    // Users: lecture pour tous, création/suppression admin seulement, modification self ou admin
+    function isProjectContributor(projectData) {
+      return projectData.ownerId == getUserId() ||
+             (getUserId() in projectData.memberIds &&
+              !(getUserId() in projectData.viewerIds));
+    }
+
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isAdmin();
-      allow update: if isSelfOrAdmin(userId);
-      allow delete: if isAdmin();
+      allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
+
+      allow update: if isSignedIn() &&
+                       userId == getUserId() &&
+                       request.resource.data.role == resource.data.role;
+
+      allow create, delete: if isSuperAdmin();
+      allow update: if isSuperAdmin();
     }
 
-    // Organizations: lecture pour tous, modification admin seulement
     match /organizations/{orgId} {
-      allow read: if isSignedIn() && belongsToOrganization(orgId);
-      allow create: if isAdmin();
-      allow update: if isAdmin() && belongsToOrganization(orgId);
-      allow delete: if false; // Jamais supprimer l'organisation
+      allow read: if isSignedIn() && belongsToOrg(orgId);
+      allow update: if isSuperAdmin() && belongsToOrg(orgId);
+      allow create, delete: if isSuperAdmin();
     }
 
-    // Teams: lecture pour tous, création/modification/suppression manager+
     match /teams/{teamId} {
-      allow read: if isSignedIn();
-      allow create: if isManager();
-      allow update: if isManager();
-      allow delete: if isManager();
+      allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
+      allow create, update, delete: if isSuperAdmin() && belongsToOrg(request.resource.data.organizationId);
     }
 
-    // Projects: lecture pour tous, création/modification/suppression manager+
     match /projects/{projectId} {
-      allow read: if isSignedIn();
-      allow create: if isManager();
-      allow update: if isManager();
-      allow delete: if isManager();
+      allow read: if isSignedIn() &&
+                     belongsToOrg(resource.data.organizationId) &&
+                     (isSuperAdmin() || isProjectMember(resource.data));
+
+      allow create: if isSuperAdmin() && belongsToOrg(request.resource.data.organizationId);
+
+      allow update: if isSignedIn() &&
+                       belongsToOrg(resource.data.organizationId) &&
+                       (isSuperAdmin() || isProjectEditor(resource.data));
+
+      allow delete: if isSuperAdmin() && belongsToOrg(resource.data.organizationId);
     }
 
-    // Tasks: lecture pour tous, création team_lead+, modification assigné ou team_lead+
     match /tasks/{taskId} {
-      allow read: if isSignedIn();
-      allow create: if isTeamLead();
-      allow update: if isSignedIn(); // Tout le monde peut modifier (pour marquer complété, etc.)
-      allow delete: if isTeamLead();
+      allow read: if isSignedIn() &&
+                     belongsToOrg(resource.data.organizationId) &&
+                     (isSuperAdmin() || isProjectMember(getProjectData(resource.data.projectId)));
+
+      allow create: if isSignedIn() &&
+                       belongsToOrg(request.resource.data.organizationId) &&
+                       (isSuperAdmin() || isProjectContributor(getProjectData(request.resource.data.projectId)));
+
+      allow update: if isSignedIn() &&
+                       belongsToOrg(resource.data.organizationId) &&
+                       (isSuperAdmin() ||
+                        isProjectEditor(getProjectData(resource.data.projectId)) ||
+                        (resource.data.assigneeId == getUserId() &&
+                         isProjectMember(getProjectData(resource.data.projectId))));
+
+      allow delete: if isSignedIn() &&
+                       belongsToOrg(resource.data.organizationId) &&
+                       (isSuperAdmin() ||
+                        isProjectEditor(getProjectData(resource.data.projectId)));
     }
 
-    // Objectives: lecture pour tous, création/modification/suppression manager+
     match /objectives/{objectiveId} {
-      allow read: if isSignedIn();
-      allow create: if isManager();
-      allow update: if isManager();
-      allow delete: if isManager();
+      allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
+      allow create, update, delete: if isSuperAdmin() && belongsToOrg(request.resource.data.organizationId);
     }
 
-    // Attendance: lecture pour tous, création/modification self ou admin
     match /attendance/{recordId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn(); // Tout le monde peut pointer
-      allow update: if isSignedIn() && (
-        resource.data.userId == request.auth.uid || isAdmin()
-      );
-      allow delete: if isAdmin();
+      allow read: if isSignedIn() &&
+                     belongsToOrg(resource.data.organizationId) &&
+                     (isSuperAdmin() || resource.data.userId == getUserId());
+
+      allow create, update: if isSignedIn() &&
+                               belongsToOrg(request.resource.data.organizationId) &&
+                               request.resource.data.userId == getUserId();
+
+      allow delete: if isSuperAdmin() && belongsToOrg(resource.data.organizationId);
     }
 
-    // Notifications: lecture/modification self, création système
     match /notifications/{notificationId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read, update, delete: if isSignedIn() && resource.data.userId == getUserId();
       allow create: if isSignedIn();
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
-    // Reports: lecture pour tous, création/modification/suppression manager+
     match /reports/{reportId} {
-      allow read: if isSignedIn();
-      allow create: if isManager();
-      allow update: if isManager();
-      allow delete: if isManager();
+      allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
+      allow create: if isSignedIn() && belongsToOrg(request.resource.data.organizationId);
+      allow update, delete: if isSuperAdmin() && belongsToOrg(resource.data.organizationId);
     }
 
-    // Comments: lecture pour tous, création pour tous, modification/suppression auteur ou admin
     match /comments/{commentId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() && (
-        resource.data.authorId == request.auth.uid || isAdmin()
-      );
-      allow delete: if isSignedIn() && (
-        resource.data.authorId == request.auth.uid || isAdmin()
-      );
+      allow read: if isSignedIn() &&
+                     (isSuperAdmin() ||
+                      isProjectMember(getProjectData(getTaskProjectId(commentId))));
+
+      allow create: if isSignedIn() &&
+                       isProjectMember(getProjectData(getTaskProjectId(commentId)));
+
+      allow update, delete: if isSignedIn() &&
+                               (isSuperAdmin() || resource.data.authorId == getUserId());
     }
 
-    // Audit Logs: lecture admin seulement, création système, jamais de modification/suppression
     match /auditLogs/{logId} {
-      allow read: if isAdmin();
+      allow read: if isSuperAdmin();
       allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow update, delete: if false;
+    }
+
+    match /passwordResets/{token} {
+      allow read, write: if false;
     }
   }
 }

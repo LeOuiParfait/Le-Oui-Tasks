@@ -121,10 +121,35 @@ class AppStore {
     this.organization = organization;
     this.initialized = true;
 
+    const isSuperAdmin = currentUser.role === 'super_admin';
+
     this.subs.push(db.subscribeUsers(orgId, (items) => { this.users = items; this.notifyListeners(); }));
     this.subs.push(db.subscribeTeams(orgId, (items) => { this.teams = items; this.notifyListeners(); }));
-    this.subs.push(db.subscribeProjects(orgId, (items) => { this.projects = items; this.notifyListeners(); }));
-    this.subs.push(db.subscribeTasks(orgId, (items) => { this.tasks = items; this.notifyListeners(); }));
+    
+    // Projects: filter by user membership unless super_admin
+    this.subs.push(db.subscribeProjects(orgId, (items) => {
+      if (isSuperAdmin) {
+        this.projects = items;
+      } else {
+        this.projects = items.filter(p => 
+          p.ownerId === currentUser.id || 
+          p.members.some(m => m.userId === currentUser.id)
+        );
+      }
+      this.notifyListeners();
+    }));
+    
+    // Tasks: filter by project membership
+    this.subs.push(db.subscribeTasks(orgId, (items) => {
+      if (isSuperAdmin) {
+        this.tasks = items;
+      } else {
+        const projectIds = this.projects.map(p => p.id);
+        this.tasks = items.filter(t => projectIds.includes(t.projectId));
+      }
+      this.notifyListeners();
+    }));
+    
     this.subs.push(db.subscribeObjectives(orgId, (items) => { this.objectives = items; this.notifyListeners(); }));
     this.subs.push(db.subscribeAttendance(orgId, (items) => { this.attendanceRecords = items; this.notifyListeners(); }));
     this.subs.push(db.subscribeNotifications(currentUser.id, (items) => { this.notifications = items; this.notifyListeners(); }));
@@ -527,7 +552,7 @@ class AppStore {
       task.updatedAt = new Date().toISOString();
     }
 
-    const reviewerId = task.reviewerId || this.users.find((u) => u.role === 'manager' || u.role === 'admin')?.id || this.getCurrentUser().id;
+    const reviewerId = task.reviewerId || this.users.find((u) => u.role === 'super_admin')?.id || this.getCurrentUser().id;
     await this.notifyUser(reviewerId, 'review_requested', 'Revue Demandée', `${this.getCurrentUser().firstName} a soumis « ${task.title} » pour revue.`, `/tasks/${task.id}`);
     await this.logAudit('Soumis pour Revue', 'task', taskId, task.title, 'En attente de validation');
     this.notify();

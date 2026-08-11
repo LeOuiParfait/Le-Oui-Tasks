@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Loader2, FolderKanban } from 'lucide-react';
-import { Project, Team, User, ProjectStatus, TaskPriority, ProjectHealth } from '../../types';
+import { Project, Team, User, ProjectStatus, TaskPriority, ProjectHealth, ProjectRole } from '../../types';
 
 interface CreateProjectModalProps {
   teams: Team[];
@@ -20,7 +20,9 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [priority, setPriority] = useState<TaskPriority>(project?.priority || 'Medium');
   const [ownerId, setOwnerId] = useState(project?.ownerId || currentUser.id);
   const [selectedTeams, setSelectedTeams] = useState<string[]>(project?.teamIds || []);
-  const [selectedMembers, setSelectedMembers] = useState<string[]>(project?.memberIds || []);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>(
+    project?.members.map(m => m.userId) || []
+  );
   const [startDate, setStartDate] = useState(project?.startDate || new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(project?.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
@@ -36,6 +38,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     if (!ownerId) { setError('Veuillez désigner un responsable.'); return; }
     setLoading(true);
     try {
+      const newMembers = selectedMembers.map(userId => ({
+        userId,
+        role: userId === ownerId ? 'owner' : 'member' as ProjectRole,
+        addedAt: new Date().toISOString()
+      }));
       await onSubmit({
         name: name.trim(),
         description: description.trim(),
@@ -45,7 +52,10 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         priority,
         ownerId,
         teamIds: selectedTeams,
-        memberIds: selectedMembers,
+        members: newMembers,
+        memberIds: newMembers.map(m => m.userId),
+        ownerIds: newMembers.filter(m => m.role === 'owner').map(m => m.userId),
+        viewerIds: newMembers.filter(m => m.role === 'viewer').map(m => m.userId),
         startDate,
         dueDate
       });

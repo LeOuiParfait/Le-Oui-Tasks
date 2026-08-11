@@ -11,6 +11,7 @@ import {
   EmailAuthProvider,
   deleteUser as deleteFirebaseUser,
   getAuth,
+  type ActionCodeSettings,
   type User as FirebaseUser
 } from 'firebase/auth';
 import {
@@ -51,6 +52,17 @@ function stripUndefined<T extends Record<string, any>>(obj: T): T {
   return result as T;
 }
 
+/** URL de la page de réinitialisation personnalisée */
+const RESET_PASSWORD_URL = typeof window !== 'undefined'
+  ? `${window.location.origin}/reset-password`
+  : 'http://localhost:5173/reset-password';
+
+/** Configuration Firebase pour l'email de réinitialisation */
+const resetPasswordSettings: ActionCodeSettings = {
+  url: RESET_PASSWORD_URL,
+  handleCodeInApp: true
+};
+
 export interface AuthSession {
   firebaseUser: FirebaseUser;
   appUser: User | null;
@@ -88,7 +100,7 @@ function mapUser(id: string, data: any): User {
     lastName: data.lastName || '',
     email: data.email || '',
     avatar: data.avatar || '',
-    role: (data.role as UserRole) || 'employee',
+    role: (data.role as UserRole) || 'user',
     teamIds: data.teamIds || [],
     jobTitle: data.jobTitle || '',
     presenceStatus: data.presenceStatus || 'offline',
@@ -116,14 +128,16 @@ function mapOrganization(id: string, data: any): Organization {
 /**
  * Check if the system has been initialized (at least one user exists in Firestore).
  * Used to decide whether to show the setup screen or the login screen.
+ * Fails safe to true (login) so the setup screen is never shown to invited users.
  */
 export async function isSystemInitialized(): Promise<boolean> {
   if (!isFirebaseConfigured) return true; // Local mode bypasses setup
   try {
     const snap = await getDocs(query(collection(db, USERS_COLLECTION), limit(1)));
     return !snap.empty;
-  } catch {
-    return false;
+  } catch (err) {
+    console.warn('[Auth] isSystemInitialized query failed, assuming initialized:', err);
+    return true; // Fail-safe: show login, never setup to unauthorized users
   }
 }
 
@@ -333,12 +347,36 @@ export async function signOutUser(): Promise<void> {
   await signOut(auth);
 }
 
+/** Send a custom invitation/reset link via the backend (100% independent of Firebase email UI). */
+export async function sendCustomResetLink(email: string, firstName?: string, userId?: string): Promise<{ link: string; emailSent: boolean; emailId?: string }> {
+  if (!isFirebaseConfigured) {
+    throw new Error('Firebase n\'est pas configuré.');
+  }
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  const response = await fetch(`${origin}/api/auth/reset-link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, firstName, appName: 'Le Oui Parfait', userId })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Erreur serveur.');
+  return { link: data.link, emailSent: data.emailSent, emailId: data.emailId };
+}
+
+export async function resendInvitation(email: string, firstName?: string, userId?: string): Promise<{ link: string; emailSent: boolean; emailId?: string }> {
+  if (!isFirebaseConfigured) {
+    throw new Error('Firebase n\'est pas configuré.');
+  }
+  return sendCustomResetLink(email, firstName, userId);
+}
+
 export async function resetPassword(email: string): Promise<void> {
   if (!isFirebaseConfigured) {
     throw new Error('Firebase n\'est pas configuré.');
   }
   try {
-    await sendPasswordResetEmail(auth, email);
+    await sendPasswordResetEmail(auth, email, resetPasswordSettings);
   } catch (error: any) {
     console.error('[Auth] Error sending password reset email:', error);
     throw new Error(`Erreur lors de l'envoi de l'email de réinitialisation: ${error.message}`);

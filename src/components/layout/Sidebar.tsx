@@ -44,14 +44,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     switch (role) {
       case 'super_admin':
         return { label: 'Super Admin', bg: 'bg-purple-50 text-purple-700' };
-      case 'admin':
-        return { label: 'Administrateur', bg: 'bg-brand-100 text-brand-dark' };
-      case 'manager':
-        return { label: 'Manager', bg: 'bg-emerald-50 text-emerald-700' };
-      case 'team_lead':
-        return { label: 'Chef d\'équipe', bg: 'bg-amber-50 text-amber-700' };
       default:
-        return { label: 'Employé', bg: 'bg-stone-100 text-stone-600' };
+        return { label: 'Utilisateur', bg: 'bg-stone-100 text-stone-600' };
     }
   };
 

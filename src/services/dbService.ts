@@ -104,7 +104,7 @@ export function mapUser(id: string, data: DocumentData): User {
     lastName: data.lastName || '',
     email: data.email || '',
     avatar: data.avatar || '',
-    role: (data.role as UserRole) || 'employee',
+    role: (data.role as UserRole) || 'user',
     teamIds: data.teamIds || [],
     jobTitle: data.jobTitle || '',
     presenceStatus: (data.presenceStatus as PresenceStatus) || 'offline',
@@ -242,7 +242,10 @@ export function mapProject(id: string, data: DocumentData): Project {
     priority: (data.priority as TaskPriority) || 'Medium',
     ownerId: data.ownerId || '',
     teamIds: data.teamIds || [],
-    memberIds: data.memberIds || [],
+    members: data.members || [],
+    memberIds: data.memberIds || (data.members || []).map((m: any) => m.userId),
+    ownerIds: data.ownerIds || (data.members || []).filter((m: any) => m.role === 'owner').map((m: any) => m.userId),
+    viewerIds: data.viewerIds || (data.members || []).filter((m: any) => m.role === 'viewer').map((m: any) => m.userId),
     startDate: data.startDate || new Date().toISOString().split('T')[0],
     dueDate: data.dueDate || new Date().toISOString().split('T')[0],
     weightedProgress: data.weightedProgress || 0,
@@ -256,6 +259,24 @@ export async function fetchProjects(orgId: string): Promise<Project[]> {
   const q = query(collection(db, COLLECTIONS.projects), where('organizationId', '==', orgId));
   const snap = await getDocs(q);
   return snap.docs.map((d) => mapProject(d.id, d.data()));
+}
+
+/** Fetch projects where the user is a member or owner (for non-super_admin users) */
+export async function fetchProjectsForUser(orgId: string, userId: string, isSuperAdmin: boolean): Promise<Project[]> {
+  if (!isFirebaseConfigured) notConfigured();
+  
+  // Super admin sees all projects
+  if (isSuperAdmin) {
+    return fetchProjects(orgId);
+  }
+  
+  // Regular users: fetch all projects then filter client-side
+  // (Firestore doesn't support array-contains on nested objects easily)
+  const allProjects = await fetchProjects(orgId);
+  return allProjects.filter(project => 
+    project.ownerId === userId || 
+    project.members.some(m => m.userId === userId)
+  );
 }
 
 export function subscribeProjects(orgId: string, cb: (projects: Project[]) => void): Unsubscribe {

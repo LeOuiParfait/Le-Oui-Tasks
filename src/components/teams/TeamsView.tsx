@@ -24,7 +24,7 @@ export const TeamsView: React.FC<TeamsViewProps> = ({
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [managingTeam, setManagingTeam] = useState<Team | null>(null);
 
-  const canManage = currentUser.role === 'super_admin' || currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'team_lead';
+  const canManage = currentUser.role === 'super_admin';
 
   const getManager = (team: Team) => users.find((u) => u.id === team.managerId);
   const getMembers = (team: Team) => team.memberIds.map((id) => users.find((u) => u.id === id)).filter(Boolean) as User[];

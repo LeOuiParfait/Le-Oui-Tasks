@@ -25,7 +25,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
 
-  const canManage = currentUser.role === 'super_admin' || currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'team_lead';
+  const canManage = currentUser.role === 'super_admin';
 
   const getHealthBadge = (health: ProjectHealth) => {
     switch (health) {

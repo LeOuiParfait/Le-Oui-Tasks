@@ -162,7 +162,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               <label className="block text-xs font-medium text-stone-600 mb-1.5">Réviseur</label>
               <select value={reviewerId} onChange={(e) => setReviewerId(e.target.value)} className="form-input-base">
                 <option value="">Aucun</option>
-                {users.filter((u) => u.role === 'super_admin' || u.role === 'admin' || u.role === 'manager' || u.role === 'team_lead').map((u) => (
+                {users.filter((u) => u.role === 'super_admin').map((u) => (
                   <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
                 ))}
               </select>

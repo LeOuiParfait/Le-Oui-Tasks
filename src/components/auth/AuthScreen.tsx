@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../services/AuthContext';
 import { isFirebaseConfigured } from '../../services/firebase';
 import { Mail, Lock, User as UserIcon, Building2, Briefcase, Eye, EyeOff, AlertCircle, Loader2, ArrowRight, Rocket, Check } from 'lucide-react';
@@ -194,12 +195,15 @@ const SetupScreen: React.FC = () => {
 
 const LoginScreen: React.FC = () => {
   const { signIn, sendPasswordReset, loading, error, clearError } = useAuth();
+  const [searchParams] = useSearchParams();
   const [mode, setMode] = useState<Mode>('signin');
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState(false);
+
+  const justReset = searchParams.get('reset') === 'success';
 
   const displayError = error || localError;
 
@@ -300,6 +304,13 @@ const LoginScreen: React.FC = () => {
             <div className="mb-5 p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-800 flex items-start gap-2.5">
               <Check className="w-4 h-4 mt-0.5 shrink-0" />
               <span>E-mail de réinitialisation envoyé. Vérifiez votre boîte de réception.</span>
+            </div>
+          )}
+
+          {justReset && (
+            <div className="mb-5 p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-800 flex items-start gap-2.5">
+              <Check className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>Votre mot de passe a été créé. Connectez-vous pour accéder à votre espace.</span>
             </div>
           )}
 

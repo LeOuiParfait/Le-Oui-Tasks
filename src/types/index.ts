@@ -1,4 +1,12 @@
-export type UserRole = 'super_admin' | 'admin' | 'manager' | 'team_lead' | 'employee';
+export type UserRole = 'super_admin' | 'user';
+
+export type ProjectRole = 'owner' | 'member' | 'viewer';
+
+export interface ProjectMember {
+  userId: string;
+  role: ProjectRole;
+  addedAt: string;
+}
 
 export type PresenceStatus = 'online' | 'away' | 'offline' | 'on_leave';
 
@@ -64,8 +72,11 @@ export interface Project {
   health: ProjectHealth;
   priority: TaskPriority;
   ownerId: string;
+  members: ProjectMember[]; // Avec rôles par projet
+  memberIds: string[]; // Pour Firestore rules (synchronisé avec members)
+  ownerIds: string[]; // Pour Firestore rules (membres avec rôle owner)
+  viewerIds: string[]; // Pour Firestore rules (membres avec rôle viewer)
   teamIds: string[];
-  memberIds: string[];
   startDate: string;
   dueDate: string;
   weightedProgress: number; // 0-100%

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { X, Building2, Users, Mail, Settings, ShieldCheck, Check, Loader2, AlertCircle, UserPlus, Crown, Camera, User as UserIcon, MailCheck, Key } from 'lucide-react';
+import { Copy, X, Building2, Users, Mail, Settings, ShieldCheck, Check, Loader2, AlertCircle, UserPlus, Crown, Camera, User as UserIcon, MailCheck, Key } from 'lucide-react';
 import { Organization, User, Team, UserRole } from '../../types';
-import { createMemberAsAdmin, sendVerificationEmail, changePassword } from '../../services/authService';
+import { createMemberAsAdmin, resendInvitation, sendVerificationEmail, changePassword } from '../../services/authService';
 import { updateUserRole, uploadAvatar, updateUser } from '../../services/dbService';
 import { isFirebaseConfigured, auth } from '../../services/firebase';
 import { store } from '../../services/store';
@@ -16,25 +16,19 @@ interface SettingsModalProps {
 
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: 'Super Admin',
-  admin: 'Administrateur',
-  manager: 'Manager',
-  team_lead: 'Chef d\'équipe',
-  employee: 'Employé'
+  user: 'Utilisateur'
 };
 
 const ROLE_COLORS: Record<UserRole, string> = {
   super_admin: 'bg-purple-50 text-purple-700',
-  admin: 'bg-brand-100 text-brand-dark',
-  manager: 'bg-emerald-50 text-emerald-700',
-  team_lead: 'bg-amber-50 text-amber-700',
-  employee: 'bg-stone-100 text-stone-600'
+  user: 'bg-stone-100 text-stone-600'
 };
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   organization, users, teams, currentUser, onClose
 }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'org' | 'users' | 'reports'>('profile');
-  const canManageUsers = currentUser.role === 'super_admin' || currentUser.role === 'admin';
+  const canManageUsers = currentUser.role === 'super_admin';
 
   return (
     <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -330,7 +324,7 @@ const UsersTab: React.FC<{ organization: Organization; users: User[]; currentUse
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [jobTitle, setJobTitle] = useState('');
-  const [role, setRole] = useState<UserRole>('employee');
+  const [role, setRole] = useState<UserRole>('user');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const inviteAvatarInputRef = useRef<HTMLInputElement>(null);
@@ -338,6 +332,8 @@ const UsersTab: React.FC<{ organization: Organization; users: User[]; currentUse
   // Role editing
   const [editingRoleFor, setEditingRoleFor] = useState<string | null>(null);
   const [savingRole, setSavingRole] = useState(false);
+  const [resendingFor, setResendingFor] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
   const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -389,14 +385,25 @@ const UsersTab: React.FC<{ organization: Organization; users: User[]; currentUse
         }
       }
 
-      setInviteSuccess(`${firstName} ${lastName} a été ajouté(e) à l'organisation.`);
+      // Generate custom reset link
+      try {
+        const result = await resendInvitation(newMember.email, newMember.firstName, newMember.id);
+        if (result.link && !result.emailSent) {
+          setCopiedLink(result.link);
+          setInviteSuccess(`${firstName} ${lastName} a été ajouté(e). E-mail non envoyé — copiez le lien ci-dessous.`);
+        } else {
+          setInviteSuccess(`${firstName} ${lastName} a été ajouté(e). Un e-mail de connexion a été envoyé.`);
+        }
+      } catch (err: any) {
+        setInviteError('Compte créé, mais échec de l\'envoi du lien : ' + err.message);
+      }
       // Reset form
       setFirstName('');
       setLastName('');
       setEmail('');
       setPassword('');
       setJobTitle('');
-      setRole('employee');
+      setRole('user');
       setAvatarFile(null);
       setAvatarPreview(null);
       setShowInviteForm(false);
@@ -427,6 +434,35 @@ const UsersTab: React.FC<{ organization: Organization; users: User[]; currentUse
         <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-start gap-2.5">
           <Check className="w-4 h-4 mt-0.5 shrink-0" />
           <span>{inviteSuccess}</span>
+        </div>
+      )}
+
+      {copiedLink && (
+        <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 space-y-2">
+          <p className="text-xs font-semibold">Lien d'activation (copiez-le et envoyez-le manuellement si l'email n'est pas arrivé) :</p>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={copiedLink}
+              className="flex-1 bg-white border border-amber-300 rounded px-2 py-1.5 text-[11px] text-stone-700 truncate"
+            />
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(copiedLink);
+                  setInviteSuccess('Lien copié dans le presse-papiers.');
+                  setTimeout(() => setInviteSuccess(null), 3000);
+                } catch {
+                  setInviteError('Impossible de copier automatiquement.');
+                }
+              }}
+              className="flex items-center gap-1 px-2 py-1.5 bg-brand hover:bg-brand-dark text-white text-[11px] font-medium rounded"
+            >
+              <Copy className="w-3 h-3" />
+              Copier
+            </button>
+          </div>
         </div>
       )}
 
@@ -570,13 +606,42 @@ const UsersTab: React.FC<{ organization: Organization; users: User[]; currentUse
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setEditingRoleFor(u.id)}
-                className={`text-[10px] font-medium px-2 py-1 rounded hover:ring-2 hover:ring-brand-100 transition-all ${ROLE_COLORS[u.role]}`}
-                title="Cliquer pour modifier le rôle"
-              >
-                {ROLE_LABELS[u.role]}
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setEditingRoleFor(u.id)}
+                  className={`text-[10px] font-medium px-2 py-1 rounded hover:ring-2 hover:ring-brand-100 transition-all ${ROLE_COLORS[u.role]}`}
+                  title="Cliquer pour modifier le rôle"
+                >
+                  {ROLE_LABELS[u.role]}
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!u.email) return;
+                    setResendingFor(u.id);
+                    try {
+                      const result = await resendInvitation(u.email, u.firstName, u.id);
+                      if (result.link) {
+                        setCopiedLink(result.link);
+                        setInviteSuccess(result.emailSent
+                          ? `Invitation envoyée à ${u.email}`
+                          : `Lien généré pour ${u.email} (email non envoyé - copiez-le ci-dessous)`);
+                      } else {
+                        setInviteSuccess(`Invitation renvoyée à ${u.email}`);
+                      }
+                      setTimeout(() => { setInviteSuccess(null); setCopiedLink(null); }, 10000);
+                    } catch (err: any) {
+                      setInviteError(err.message || 'Erreur lors du renvoi.');
+                    } finally {
+                      setResendingFor(null);
+                    }
+                  }}
+                  disabled={resendingFor === u.id || u.id === currentUser.id}
+                  title="Générer un lien d'activation"
+                  className="text-[10px] text-brand hover:text-brand-dark font-medium disabled:opacity-50"
+                >
+                  {resendingFor === u.id ? 'Génération...' : 'Renvoyer'}
+                </button>
+              </div>
             )}
           </div>
         ))}
