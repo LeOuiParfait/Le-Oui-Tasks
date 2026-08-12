@@ -18,9 +18,14 @@ export const initialOrganization: Organization = {
   industry: 'Software & Cloud Services',
   timezone: 'Europe/Paris',
   workingHours: {
-    start: '09:00',
-    end: '18:00'
-  },
+    monday:    { enabled: true,  start: '09:00', end: '18:00' },
+    tuesday:   { enabled: true,  start: '09:00', end: '18:00' },
+    wednesday: { enabled: true,  start: '09:00', end: '18:00' },
+    thursday:  { enabled: true,  start: '09:00', end: '18:00' },
+    friday:    { enabled: true,  start: '09:00', end: '17:00' },
+    saturday:  { enabled: false, start: '09:00', end: '13:00' },
+    sunday:    { enabled: false, start: '09:00', end: '17:00' }
+  } as any,
   workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
   defaultWorkdayDurationHours: 8,
   reportEmailRecipients: ['cto@acmedigital.com', 'nizarrallii85@gmail.com']
@@ -48,9 +53,9 @@ export const initialUsers: User[] = [
     lastName: 'Jenkins',
     email: 'sarah.j@acmedigital.com',
     avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-    role: 'user',
+    role: 'admin',
     teamIds: ['team-dev'],
-    jobTitle: 'Engineering Manager',
+    jobTitle: 'Directrice des Opérations',
     presenceStatus: 'online',
     lastActiveAt: new Date().toISOString(),
     createdAt: '2025-01-12T08:00:00Z'
@@ -62,9 +67,9 @@ export const initialUsers: User[] = [
     lastName: 'Vance',
     email: 'thomas.v@acmedigital.com',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    role: 'user',
+    role: 'manager',
     teamIds: ['team-dev'],
-    jobTitle: 'Lead Backend Architect',
+    jobTitle: 'Chef de Projet Backend',
     presenceStatus: 'online',
     lastActiveAt: new Date().toISOString(),
     createdAt: '2025-01-15T08:00:00Z'
@@ -90,9 +95,9 @@ export const initialUsers: User[] = [
     lastName: 'Rostova',
     email: 'elena.r@acmedigital.com',
     avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
-    role: 'user',
+    role: 'team_lead',
     teamIds: ['team-design'],
-    jobTitle: 'Principal Product Designer',
+    jobTitle: 'Lead Designer',
     presenceStatus: 'away',
     lastActiveAt: new Date(Date.now() - 15 * 60000).toISOString(),
     createdAt: '2025-02-05T08:00:00Z'
@@ -106,7 +111,7 @@ export const initialUsers: User[] = [
     avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
     role: 'user',
     teamIds: ['team-comm'],
-    jobTitle: 'DevOps & Security Specialist',
+    jobTitle: 'DevOps Engineer',
     presenceStatus: 'online',
     lastActiveAt: new Date().toISOString(),
     createdAt: '2025-02-10T08:00:00Z'
@@ -202,11 +207,11 @@ export const initialProjects: Project[] = [
     teamIds: ['team-dev', 'team-comm'],
     members: [
       { userId: 'user-1', role: 'owner', addedAt: '2026-08-01T08:00:00Z' },
-      { userId: 'user-2', role: 'member', addedAt: '2026-08-01T08:00:00Z' },
-      { userId: 'user-3', role: 'member', addedAt: '2026-08-01T08:00:00Z' },
-      { userId: 'user-4', role: 'member', addedAt: '2026-08-01T08:00:00Z' },
+      { userId: 'user-2', role: 'lead', addedAt: '2026-08-01T08:00:00Z' },
+      { userId: 'user-3', role: 'lead', addedAt: '2026-08-01T08:00:00Z' },
+      { userId: 'user-4', role: 'contributor', addedAt: '2026-08-01T08:00:00Z' },
       { userId: 'user-6', role: 'viewer', addedAt: '2026-08-01T08:00:00Z' },
-      { userId: 'user-7', role: 'member', addedAt: '2026-08-01T08:00:00Z' }
+      { userId: 'user-7', role: 'contributor', addedAt: '2026-08-01T08:00:00Z' }
     ],
     memberIds: ['user-1', 'user-2', 'user-3', 'user-4', 'user-6', 'user-7'],
     ownerIds: ['user-1'],
@@ -230,8 +235,8 @@ export const initialProjects: Project[] = [
     teamIds: ['team-design', 'team-dev'],
     members: [
       { userId: 'user-1', role: 'owner', addedAt: '2026-08-05T08:00:00Z' },
-      { userId: 'user-5', role: 'member', addedAt: '2026-08-05T08:00:00Z' },
-      { userId: 'user-4', role: 'member', addedAt: '2026-08-05T08:00:00Z' }
+      { userId: 'user-5', role: 'lead', addedAt: '2026-08-05T08:00:00Z' },
+      { userId: 'user-4', role: 'contributor', addedAt: '2026-08-05T08:00:00Z' }
     ],
     memberIds: ['user-1', 'user-5', 'user-4'],
     ownerIds: ['user-1'],
@@ -255,7 +260,7 @@ export const initialProjects: Project[] = [
     teamIds: ['team-comm'],
     members: [
       { userId: 'user-3', role: 'owner', addedAt: '2026-08-08T08:00:00Z' },
-      { userId: 'user-6', role: 'member', addedAt: '2026-08-08T08:00:00Z' }
+      { userId: 'user-6', role: 'contributor', addedAt: '2026-08-08T08:00:00Z' }
     ],
     memberIds: ['user-3', 'user-6'],
     ownerIds: ['user-3'],
@@ -279,7 +284,7 @@ export const initialProjects: Project[] = [
     teamIds: ['team-mktg'],
     members: [
       { userId: 'user-8', role: 'owner', addedAt: '2026-08-10T08:00:00Z' },
-      { userId: 'user-4', role: 'member', addedAt: '2026-08-10T08:00:00Z' }
+      { userId: 'user-4', role: 'contributor', addedAt: '2026-08-10T08:00:00Z' }
     ],
     memberIds: ['user-8', 'user-4'],
     ownerIds: ['user-8'],

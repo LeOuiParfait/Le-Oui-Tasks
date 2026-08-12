@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { Copy, X, Building2, Users, Mail, Settings, ShieldCheck, Check, Loader2, AlertCircle, UserPlus, Crown, Camera, User as UserIcon, MailCheck, Key } from 'lucide-react';
+import { Copy, X, Building2, Users, Mail, Settings, ShieldCheck, Check, Loader2, AlertCircle, UserPlus, Crown, Camera, User as UserIcon, MailCheck, Key, Shield } from 'lucide-react';
 import { Organization, User, Team, UserRole } from '../../types';
 import { createMemberAsAdmin, resendInvitation, sendVerificationEmail, changePassword } from '../../services/authService';
 import { updateUserRole, uploadAvatar, updateUser } from '../../services/dbService';
 import { isFirebaseConfigured, auth } from '../../services/firebase';
 import { store } from '../../services/store';
+import { RolesGuide } from './RolesGuide';
 
 interface SettingsModalProps {
   organization: Organization;
@@ -16,19 +17,27 @@ interface SettingsModalProps {
 
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: 'Super Admin',
-  user: 'Utilisateur'
+  admin: 'Administrateur',
+  manager: 'Manager',
+  team_lead: 'Chef d\'Équipe',
+  user: 'Utilisateur',
+  viewer: 'Observateur'
 };
 
 const ROLE_COLORS: Record<UserRole, string> = {
   super_admin: 'bg-purple-50 text-purple-700',
-  user: 'bg-stone-100 text-stone-600'
+  admin: 'bg-blue-50 text-blue-700',
+  manager: 'bg-emerald-50 text-emerald-700',
+  team_lead: 'bg-amber-50 text-amber-700',
+  user: 'bg-stone-100 text-stone-600',
+  viewer: 'bg-slate-100 text-slate-600'
 };
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   organization, users, teams, currentUser, onClose
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'org' | 'users' | 'reports'>('profile');
-  const canManageUsers = currentUser.role === 'super_admin';
+  const [activeTab, setActiveTab] = useState<'profile' | 'org' | 'users' | 'reports' | 'roles'>('profile');
+  const canManageUsers = currentUser.role === 'super_admin' || currentUser.role === 'admin';
 
   return (
     <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -43,19 +52,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        <div className="flex border-b border-stone-100 px-6 bg-stone-50/30">
-          <button onClick={() => setActiveTab('profile')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors ${activeTab === 'profile' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+        <div className="flex border-b border-stone-100 px-6 bg-stone-50/30 overflow-x-auto">
+          <button onClick={() => setActiveTab('profile')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'profile' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
             Mon Profil
           </button>
           {canManageUsers && (
-            <button onClick={() => setActiveTab('users')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors ${activeTab === 'users' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
-              Membres & Invitations
-            </button>
+            <>
+              <button onClick={() => setActiveTab('users')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'users' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+                Membres & Invitations
+              </button>
+              <button onClick={() => setActiveTab('roles')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'roles' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+                <Shield className="w-3.5 h-3.5 inline mr-1.5" />
+                Guide des Rôles
+              </button>
+            </>
           )}
-          <button onClick={() => setActiveTab('org')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors ${activeTab === 'org' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+          <button onClick={() => setActiveTab('org')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'org' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
             Entreprise
           </button>
-          <button onClick={() => setActiveTab('reports')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors ${activeTab === 'reports' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+          <button onClick={() => setActiveTab('reports')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'reports' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
             Rapports
           </button>
         </div>
@@ -65,6 +80,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <ProfileTab currentUser={currentUser} />
           ) : activeTab === 'users' && canManageUsers ? (
             <UsersTab organization={organization} users={users} currentUser={currentUser} />
+          ) : activeTab === 'roles' && canManageUsers ? (
+            <RolesGuide />
           ) : activeTab === 'org' ? (
             <OrgTab organization={organization} />
           ) : (
@@ -546,10 +563,11 @@ const UsersTab: React.FC<{ organization: Organization; users: User[]; currentUse
             <div>
               <label className="block text-[11px] font-semibold text-stone-600 mb-1">Rôle</label>
               <select value={role} onChange={(e) => setRole(e.target.value as UserRole)} className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-xs">
-                <option value="employee">Employé</option>
+                <option value="user">Utilisateur</option>
                 <option value="team_lead">Chef d'équipe</option>
                 <option value="manager">Manager</option>
                 <option value="admin">Administrateur</option>
+                <option value="viewer">Observateur</option>
               </select>
             </div>
           </div>
@@ -596,10 +614,11 @@ const UsersTab: React.FC<{ organization: Organization; users: User[]; currentUse
                   onChange={(e) => handleChangeRole(u.id, e.target.value as UserRole)}
                   className="text-[10px] border border-stone-200 rounded px-2 py-1 bg-white"
                 >
-                  <option value="employee">Employé</option>
+                  <option value="user">Utilisateur</option>
                   <option value="team_lead">Chef d'équipe</option>
                   <option value="manager">Manager</option>
                   <option value="admin">Administrateur</option>
+                  <option value="viewer">Observateur</option>
                 </select>
                 <button onClick={() => setEditingRoleFor(null)} className="text-stone-400 hover:text-stone-600">
                   <X className="w-3 h-3" />
@@ -652,43 +671,258 @@ const UsersTab: React.FC<{ organization: Organization; users: User[]; currentUse
 
 // ============== ORG TAB ==============
 
-const OrgTab: React.FC<{ organization: Organization }> = ({ organization }) => (
-  <div className="space-y-4">
-    <div>
-      <label className="block font-bold text-stone-700 uppercase mb-1">Nom de l'Entreprise</label>
-      <input type="text" defaultValue={organization.name} className="w-full border border-stone-200 rounded-xl p-2.5 font-medium" />
-    </div>
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+const OrgTab: React.FC<{ organization: Organization }> = ({ organization }) => {
+  const [orgName, setOrgName] = useState(organization.name);
+  const [orgIndustry, setOrgIndustry] = useState(organization.industry);
+  const [orgTimezone, setOrgTimezone] = useState(organization.timezone);
+  const [workingHours, setWorkingHours] = useState(() => {
+    // Rétrocompatibilité : si ancien format, créer le nouveau
+    const wh = organization.workingHours as any;
+    if (wh?.monday) return wh;
+    // Ancien format
+    return {
+      monday:    { enabled: true,  start: wh?.start || '09:00', end: wh?.end || '18:00' },
+      tuesday:   { enabled: true,  start: wh?.start || '09:00', end: wh?.end || '18:00' },
+      wednesday: { enabled: true,  start: wh?.start || '09:00', end: wh?.end || '18:00' },
+      thursday:  { enabled: true,  start: wh?.start || '09:00', end: wh?.end || '18:00' },
+      friday:    { enabled: true,  start: wh?.start || '09:00', end: wh?.end || '18:00' },
+      saturday:  { enabled: false, start: '09:00', end: '13:00' },
+      sunday:    { enabled: false, start: '09:00', end: '17:00' }
+    };
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const DAY_LABELS_FR = [
+    { key: 'monday', label: 'Lundi' },
+    { key: 'tuesday', label: 'Mardi' },
+    { key: 'wednesday', label: 'Mercredi' },
+    { key: 'thursday', label: 'Jeudi' },
+    { key: 'friday', label: 'Vendredi' },
+    { key: 'saturday', label: 'Samedi' },
+    { key: 'sunday', label: 'Dimanche' }
+  ];
+
+  const updateDay = (dayKey: string, field: string, value: any) => {
+    setWorkingHours((prev: any) => ({
+      ...prev,
+      [dayKey]: { ...prev[dayKey], [field]: value }
+    }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await store.updateOrganization({
+        name: orgName,
+        industry: orgIndustry,
+        timezone: orgTimezone,
+        workingHours: workingHours as any
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de la sauvegarde.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
       <div>
-        <label className="block font-bold text-stone-700 uppercase mb-1">Fuseau Horaire</label>
-        <input type="text" defaultValue={organization.timezone} className="w-full border border-stone-200 rounded-xl p-2.5" />
+        <label className="block font-bold text-stone-700 uppercase mb-1 text-xs">Nom de l'Entreprise</label>
+        <input
+          type="text"
+          value={orgName}
+          onChange={(e) => setOrgName(e.target.value)}
+          className="w-full border border-stone-200 rounded-xl p-2.5 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition-all"
+        />
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block font-bold text-stone-700 uppercase mb-1 text-xs">Fuseau Horaire</label>
+          <select
+            value={orgTimezone}
+            onChange={(e) => setOrgTimezone(e.target.value)}
+            className="w-full border border-stone-200 rounded-xl p-2.5 font-medium text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition-all"
+          >
+            <option value="Europe/Paris">Europe/Paris (CET)</option>
+            <option value="Europe/London">Europe/London (GMT)</option>
+            <option value="America/New_York">America/New_York (EST)</option>
+            <option value="America/Los_Angeles">America/Los_Angeles (PST)</option>
+            <option value="Africa/Douala">Africa/Douala (WAT)</option>
+            <option value="Africa/Casablanca">Africa/Casablanca (WET)</option>
+            <option value="Asia/Dubai">Asia/Dubai (GST)</option>
+            <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
+          </select>
+        </div>
+        <div>
+          <label className="block font-bold text-stone-700 uppercase mb-1 text-xs">Secteur</label>
+          <input
+            type="text"
+            value={orgIndustry}
+            onChange={(e) => setOrgIndustry(e.target.value)}
+            className="w-full border border-stone-200 rounded-xl p-2.5 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition-all"
+          />
+        </div>
+      </div>
+
+      {/* Heures de travail par jour */}
       <div>
-        <label className="block font-bold text-stone-700 uppercase mb-1">Heures de Travail</label>
-        <input type="text" defaultValue={`${organization.workingHours.start} - ${organization.workingHours.end}`} className="w-full border border-stone-200 rounded-xl p-2.5" />
+        <label className="block font-bold text-stone-700 uppercase mb-2 text-xs">Heures de Travail par Jour</label>
+        <p className="text-[11px] text-stone-400 mb-3">
+          Définissez les plages horaires pour chaque jour. Les users ne pourront pointer que pendant ces plages.
+        </p>
+        <div className="space-y-2">
+          {DAY_LABELS_FR.map(({ key, label }) => {
+            const day = (workingHours as any)[key];
+            return (
+              <div
+                key={key}
+                className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                  day.enabled ? 'bg-white border-stone-200' : 'bg-stone-50 border-stone-100'
+                }`}
+              >
+                {/* Toggle */}
+                <button
+                  onClick={() => updateDay(key, 'enabled', !day.enabled)}
+                  className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${
+                    day.enabled ? 'bg-brand' : 'bg-stone-300'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                      day.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+                {/* Jour */}
+                <span className={`text-sm font-medium w-24 shrink-0 ${day.enabled ? 'text-stone-900' : 'text-stone-400'}`}>
+                  {label}
+                </span>
+                {/* Heures */}
+                <div className={`flex items-center gap-2 ${day.enabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                  <input
+                    type="time"
+                    value={day.start}
+                    onChange={(e) => updateDay(key, 'start', e.target.value)}
+                    className="border border-stone-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand"
+                  />
+                  <span className="text-stone-400 text-xs">→</span>
+                  <input
+                    type="time"
+                    value={day.end}
+                    onChange={(e) => updateDay(key, 'end', e.target.value)}
+                    className="border border-stone-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand"
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
+
+      {error && (
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {saved && (
+        <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 flex items-center gap-2">
+          <Check className="w-4 h-4" />
+          Paramètres enregistrés avec succès !
+        </div>
+      )}
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="flex items-center gap-2 px-4 py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-colors"
+      >
+        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+        <span>{saving ? 'Sauvegarde...' : 'Enregistrer les paramètres'}</span>
+      </button>
     </div>
-    <div>
-      <label className="block font-bold text-stone-700 uppercase mb-1">Secteur</label>
-      <input type="text" defaultValue={organization.industry} className="w-full border border-stone-200 rounded-xl p-2.5" />
-    </div>
-  </div>
-);
+  );
+};
 
 // ============== REPORTS TAB ==============
 
-const ReportsTab: React.FC<{ organization: Organization }> = ({ organization }) => (
-  <div className="space-y-4">
-    <div>
-      <label className="block font-bold text-stone-700 uppercase mb-1">Destinataires des Rapports Quotidiens</label>
-      <textarea
-        rows={4}
-        defaultValue={organization.reportEmailRecipients.join('\n')}
-        className="w-full border border-stone-200 rounded-xl p-2.5 font-mono"
-      />
-      <p className="text-[11px] text-stone-400 mt-1">
-        Un e-mail par ligne. Les rapports seront envoyés automatiquement chaque jour ouvrable à 18h00 ({organization.timezone}).
-      </p>
+const ReportsTab: React.FC<{ organization: Organization }> = ({ organization }) => {
+  const [recipients, setRecipients] = useState(organization.reportEmailRecipients.join('\n'));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    setError(null);
+    const emails = recipients
+      .split('\n')
+      .map(e => e.trim())
+      .filter(e => e.length > 0);
+
+    // Validation simple
+    const invalid = emails.find(e => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+    if (invalid) {
+      setError(`E-mail invalide : ${invalid}`);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await store.updateOrganization({ reportEmailRecipients: emails });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de la sauvegarde.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block font-bold text-stone-700 uppercase mb-1 text-xs">Destinataires des Rapports Quotidiens</label>
+        <textarea
+          rows={5}
+          value={recipients}
+          onChange={(e) => setRecipients(e.target.value)}
+          className="w-full border border-stone-200 rounded-xl p-2.5 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition-all"
+          placeholder="exemple@entreprise.com"
+        />
+        <p className="text-[11px] text-stone-400 mt-1">
+          Un e-mail par ligne. Les rapports seront envoyés à ces adresses.
+        </p>
+      </div>
+
+      {error && (
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {saved && (
+        <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 flex items-center gap-2">
+          <Check className="w-4 h-4" />
+          Destinataires mis à jour avec succès !
+        </div>
+      )}
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="flex items-center gap-2 px-4 py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-colors"
+      >
+        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+        <span>{saving ? 'Sauvegarde...' : 'Enregistrer les destinataires'}</span>
+      </button>
     </div>
-  </div>
-);
+  );
+};

@@ -16,6 +16,13 @@ import {
   X
 } from 'lucide-react';
 import { User, UserRole } from '../../types';
+import {
+  canViewKanbanBoard,
+  canViewTeamsView,
+  canViewObjectivesView,
+  canViewReportsView,
+  canViewAnalyticsView
+} from '../../services/permissions';
 
 interface SidebarProps {
   currentView: string;
@@ -44,6 +51,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     switch (role) {
       case 'super_admin':
         return { label: 'Super Admin', bg: 'bg-purple-50 text-purple-700' };
+      case 'admin':
+        return { label: 'Admin', bg: 'bg-blue-50 text-blue-700' };
+      case 'manager':
+        return { label: 'Manager', bg: 'bg-emerald-50 text-emerald-700' };
+      case 'team_lead':
+        return { label: 'Chef d\'Équipe', bg: 'bg-amber-50 text-amber-700' };
+      case 'viewer':
+        return { label: 'Observateur', bg: 'bg-slate-50 text-slate-700' };
       default:
         return { label: 'Utilisateur', bg: 'bg-stone-100 text-stone-600' };
     }
@@ -85,14 +100,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             Menu Principal
           </div>
           <nav className="space-y-1">
-            <button onClick={() => handleSelect('kanban')} className={navItemClass(currentView === 'kanban' || currentView === 'tasks')}>
-              <div className="flex items-center gap-3">
-                <CheckSquare className="w-4 h-4 shrink-0" />
-                <span>Toutes les Tâches</span>
-              </div>
-              <span className="text-xs bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full font-medium shrink-0">{tasksCount}</span>
-            </button>
+            {/* Kanban global - Admins et management uniquement */}
+            {canViewKanbanBoard(currentUser) && (
+              <button onClick={() => handleSelect('kanban')} className={navItemClass(currentView === 'kanban' || currentView === 'tasks')}>
+                <div className="flex items-center gap-3">
+                  <CheckSquare className="w-4 h-4 shrink-0" />
+                  <span>Toutes les Tâches</span>
+                </div>
+                <span className="text-xs bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full font-medium shrink-0">{tasksCount}</span>
+              </button>
+            )}
 
+            {/* Mon Travail - Tous sauf viewer */}
             <button onClick={() => handleSelect('mywork')} className={navItemClass(currentView === 'mywork')}>
               <div className="flex items-center gap-3">
                 <UserCheck className="w-4 h-4 shrink-0" />
@@ -100,6 +119,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </button>
 
+            {/* Notifications - Tous */}
             <button onClick={() => handleSelect('notifications')} className={navItemClass(currentView === 'notifications')}>
               <div className="flex items-center gap-3">
                 <Bell className="w-4 h-4 shrink-0" />
@@ -110,6 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </button>
 
+            {/* Projets - Tous (mais filtré dans la vue) */}
             <div
               onClick={() => handleSelect('projects')}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
@@ -130,6 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             </div>
 
+            {/* Présences - Tous (mais filtré dans la vue) */}
             <button onClick={() => handleSelect('attendance')} className={navItemClass(currentView === 'attendance')}>
               <div className="flex items-center gap-3">
                 <Clock className="w-4 h-4 shrink-0" />
@@ -138,33 +160,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="Statut en direct" />
             </button>
 
-            <button onClick={() => handleSelect('teams')} className={navItemClass(currentView === 'teams')}>
-              <div className="flex items-center gap-3">
-                <Users className="w-4 h-4 shrink-0" />
-                <span>Équipes</span>
-              </div>
-            </button>
+            {/* Équipes - Admins et management */}
+            {canViewTeamsView(currentUser) && (
+              <button onClick={() => handleSelect('teams')} className={navItemClass(currentView === 'teams')}>
+                <div className="flex items-center gap-3">
+                  <Users className="w-4 h-4 shrink-0" />
+                  <span>Équipes</span>
+                </div>
+              </button>
+            )}
 
-            <button onClick={() => handleSelect('objectives')} className={navItemClass(currentView === 'objectives')}>
-              <div className="flex items-center gap-3">
-                <Target className="w-4 h-4 shrink-0" />
-                <span>Objectifs</span>
-              </div>
-            </button>
+            {/* Objectifs - Tous sauf viewer */}
+            {canViewObjectivesView(currentUser) && (
+              <button onClick={() => handleSelect('objectives')} className={navItemClass(currentView === 'objectives')}>
+                <div className="flex items-center gap-3">
+                  <Target className="w-4 h-4 shrink-0" />
+                  <span>Objectifs</span>
+                </div>
+              </button>
+            )}
 
-            <button onClick={() => handleSelect('reports')} className={navItemClass(currentView === 'reports')}>
-              <div className="flex items-center gap-3">
-                <FileText className="w-4 h-4 shrink-0" />
-                <span>Rapports</span>
-              </div>
-            </button>
+            {/* Rapports - Management uniquement */}
+            {canViewReportsView(currentUser) && (
+              <button onClick={() => handleSelect('reports')} className={navItemClass(currentView === 'reports')}>
+                <div className="flex items-center gap-3">
+                  <FileText className="w-4 h-4 shrink-0" />
+                  <span>Rapports</span>
+                </div>
+              </button>
+            )}
 
-            <button onClick={() => handleSelect('analytics')} className={navItemClass(currentView === 'analytics')}>
-              <div className="flex items-center gap-3">
-                <BarChart3 className="w-4 h-4 shrink-0" />
-                <span>Analytique</span>
-              </div>
-            </button>
+            {/* Analytique - Management uniquement */}
+            {canViewAnalyticsView(currentUser) && (
+              <button onClick={() => handleSelect('analytics')} className={navItemClass(currentView === 'analytics')}>
+                <div className="flex items-center gap-3">
+                  <BarChart3 className="w-4 h-4 shrink-0" />
+                  <span>Analytique</span>
+                </div>
+              </button>
+            )}
           </nav>
         </div>
       </div>

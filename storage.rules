@@ -1,21 +1,39 @@
 rules_version = '2';
 
 // Règles Firebase Storage — Le Oui Parfait
-// Accès authentifié requis pour toutes les opérations.
+// Accès strictement contrôlé : un user ne peut écrire que dans SON propre dossier.
 service firebase.storage {
   match /b/{bucket}/o {
-    // Avatars : tout utilisateur authentifié peut lire et uploader
+
+    // --- Avatars : chaque user ne peut écrire que dans SON dossier ---
     match /avatars/{userId}/{fileName} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
+        && request.auth.uid == userId
         && request.resource.size < 5 * 1024 * 1024  // max 5 Mo
         && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null
+        && request.auth.uid == userId;
     }
 
-    // Fallback : tout utilisateur authentifié
-    match /{allPaths=**} {
+    // --- Pièces jointes des bilans (workDayReports) ---
+    // Un user ne peut uploader que dans son propre sous-dossier
+    match /workDayReports/{userId}/{fileName} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 10 * 1024 * 1024  // max 10 Mo
+        && (request.resource.contentType.matches('image/.*')
+            || request.resource.contentType.matches('application/pdf')
+            || request.resource.contentType.matches('application/msword')
+            || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.*'));
+      allow delete: if request.auth != null
+        && request.auth.uid == userId;
+    }
+
+    // --- DEFAULT DENY : tout autre chemin est refusé ---
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

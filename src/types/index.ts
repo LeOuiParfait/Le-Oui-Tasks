@@ -1,6 +1,16 @@
-export type UserRole = 'super_admin' | 'user';
+export type UserRole = 
+  | 'super_admin'    // Propriétaire organisation - Accès total
+  | 'admin'          // Administrateur - Gestion équipes/projets/utilisateurs
+  | 'manager'        // Manager/Chef de projet - Gestion de ses projets et équipes
+  | 'team_lead'      // Chef d'équipe - Gestion de son équipe uniquement
+  | 'user'           // Utilisateur standard - Voit uniquement ses tâches
+  | 'viewer';        // Observateur - Lecture seule
 
-export type ProjectRole = 'owner' | 'member' | 'viewer';
+export type ProjectRole = 
+  | 'owner'          // Propriétaire du projet - Contrôle total
+  | 'lead'           // Chef de projet délégué - Gestion équipe + tâches
+  | 'contributor'    // Contributeur - Crée/édite des tâches
+  | 'viewer';        // Observateur - Lecture seule
 
 export interface ProjectMember {
   userId: string;
@@ -32,7 +42,14 @@ export interface User {
   jobTitle: string;
   presenceStatus: PresenceStatus;
   lastActiveAt: string;
+  lastSessionId?: string;      // ID de session pour multi-PC
   createdAt: string;
+}
+
+export interface DayWorkingHours {
+  enabled: boolean;
+  start: string; // "HH:MM"
+  end: string;   // "HH:MM"
 }
 
 export interface Organization {
@@ -41,9 +58,20 @@ export interface Organization {
   logo: string;
   industry: string;
   timezone: string;
+  // Heures de travail par jour (7 jours)
+  // Ancien format (rétrocompatibilité) : { start, end }
+  // Nouveau format : par jour de la semaine
   workingHours: {
     start: string;
     end: string;
+  } | {
+    monday: DayWorkingHours;
+    tuesday: DayWorkingHours;
+    wednesday: DayWorkingHours;
+    thursday: DayWorkingHours;
+    friday: DayWorkingHours;
+    saturday: DayWorkingHours;
+    sunday: DayWorkingHours;
   };
   workingDays: string[];
   defaultWorkdayDurationHours: number;
@@ -160,6 +188,14 @@ export interface AttendanceRecord {
   totalBreakMinutes: number;
   status: 'working' | 'on_break' | 'completed' | 'absent';
   summary?: string;
+  // Suivi de présence hybride
+  timeEstimated?: boolean;       // true si le temps est estimé (inactivité détectée)
+  inactivePeriods?: {            // Périodes d'inactivité détectées
+    start: string;
+    end: string;
+    minutes: number;
+  }[];
+  lastHeartbeatAt?: string;      // Dernier heartbeat reçu
 }
 
 export interface Notification {
@@ -218,4 +254,35 @@ export interface DailyReport {
   sentAt?: string;
   recipients: string[];
   status: 'draft' | 'sent';
+}
+
+// Bilan journalier individuel soumis par chaque user
+export interface WorkDayReport {
+  id: string;
+  organizationId: string;
+  userId: string;          // Qui a soumis
+  teamId?: string;         // Équipe du user
+  date: string;            // YYYY-MM-DD
+  // Contenu du bilan
+  summary: string;         // Bilan textuel global
+  tasksWorkedOn: {
+    taskId: string;
+    taskTitle: string;
+    progressNote?: string; // ce qu'il a fait dessus
+  }[];
+  achievements: string;    // Ce qu'il a accompli
+  challenges: string;      // Difficultés rencontrées
+  planTomorrow: string;    // Plan pour demain
+  // Métadonnées de présence
+  workMinutes: number;
+  breakMinutes: number;
+  startTime?: string;
+  endTime?: string;
+  // Soumission
+  status: 'draft' | 'submitted';
+  submittedAt?: string;
+  // Qui peut voir
+  visibleTo: string[]; // userIds qui peuvent voir ce bilan
+  createdAt: string;
+  updatedAt: string;
 }

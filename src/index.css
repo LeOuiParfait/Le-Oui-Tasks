@@ -18,12 +18,55 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
+  /* Hiérarchie typographique normalisée */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
 }
 
 /* Brand display font — Fraunces (modern serif, elegant) */
+/* Utilisé uniquement pour les titres de pages importantes (auth, landing) */
 .font-brand {
   font-family: 'Fraunces', Georgia, serif;
   font-optical-sizing: auto;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+/* Classes utilitaires typographiques */
+.heading-1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.heading-2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.heading-3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.body-text {
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.body-text-sm {
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
 }
 
 /* Custom scrollbar utility */

@@ -11,7 +11,8 @@ import {
   AuditLog,
   DailyReport,
   Comment,
-  Subtask
+  Subtask,
+  WorkDayReport
 } from '../types';
 import {
   initialOrganization,
@@ -28,6 +29,24 @@ import {
 import { isFirebaseConfigured } from './firebase';
 import * as db from './dbService';
 import type { Unsubscribe } from 'firebase/firestore';
+import {
+  canEditOrgSettings,
+  canCreateProject,
+  canDeleteProject,
+  canEditProject,
+  canCreateTask,
+  canEditTask,
+  canDeleteTask,
+  canApproveTask,
+  canCreateTeam,
+  canDeleteTeam,
+  canManageTeamMembers,
+  canEditTeam,
+  canCreateObjective,
+  canDeleteObjective,
+  canGenerateOrgReport,
+  canChangeRoles
+} from './permissions';
 
 const STORAGE_PREFIX = 'tasking_app_v1_';
 
@@ -50,6 +69,7 @@ class AppStore {
   private notifications: Notification[] = [];
   private auditLogs: AuditLog[] = [];
   private reports: DailyReport[] = [];
+  private workDayReports: WorkDayReport[] = [];
   private comments: Record<string, Comment[]> = {};
 
   private initialized = false;
@@ -154,6 +174,7 @@ class AppStore {
     this.subs.push(db.subscribeAttendance(orgId, (items) => { this.attendanceRecords = items; this.notifyListeners(); }));
     this.subs.push(db.subscribeNotifications(currentUser.id, (items) => { this.notifications = items; this.notifyListeners(); }));
     this.subs.push(db.subscribeReports(orgId, (items) => { this.reports = items; this.notifyListeners(); }));
+    this.subs.push(db.subscribeWorkDayReports(orgId, (items) => { this.workDayReports = items; this.notifyListeners(); }));
   }
 
   /** Tear down all Firestore subscriptions. */
@@ -216,6 +237,20 @@ class AppStore {
     return this.organization || initialOrganization;
   }
 
+  async updateOrganization(updates: Partial<Organization>): Promise<void> {
+    // SÉCURITÉ : Seuls les admin/super_admin peuvent modifier les paramètres de l'org
+    const user = this.getCurrentUser();
+    if (!canEditOrgSettings(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de modifier les paramètres de l\'organisation.');
+    }
+    const orgId = this.getOrganization().id;
+    if (isFirebaseConfigured) {
+      await db.updateOrganization(orgId, updates);
+    }
+    this.organization = { ...this.getOrganization(), ...updates };
+    this.notify();
+  }
+
   getUsers(): User[] {
     return this.users;
   }
@@ -251,6 +286,126 @@ class AppStore {
 
   getReports(): DailyReport[] {
     return this.reports;
+  }
+
+  // === WorkDayReports (bilans journaliers individuels) ===
+  getWorkDayReports(): WorkDayReport[] {
+    return this.workDayReports;
+  }
+
+  getMyWorkDayReports(): WorkDayReport[] {
+    const user = this.getCurrentUser();
+    return this.workDayReports.filter(r => r.userId === user.id);
+  }
+
+  getVisibleWorkDayReports(): WorkDayReport[] {
+    const user = this.getCurrentUser();
+    // super_admin et admin voient tout
+    if (user.role === 'super_admin' || user.role === 'admin') {
+      return this.workDayReports;
+    }
+    // team_lead voit les bilans de son équipe
+    if (user.role === 'team_lead') {
+      const myTeams = this.teams.filter(t => t.managerId === user.id);
+      const teamMemberIds = new Set<string>();
+      myTeams.forEach(t => t.memberIds.forEach(id => teamMemberIds.add(id)));
+      teamMemberIds.add(user.id);
+      return this.workDayReports.filter(r => teamMemberIds.has(r.userId));
+    }
+    // manager voit les bilans des users de ses projets
+    if (user.role === 'manager') {
+      const myProjects = this.projects.filter(p =>
+        p.memberIds.includes(user.id) &&
+        (p.ownerId === user.id || p.members.some(m => m.userId === user.id && m.role === 'lead'))
+      );
+      const projectMemberIds = new Set<string>();
+      myProjects.forEach(p => p.memberIds.forEach(id => projectMemberIds.add(id)));
+      projectMemberIds.add(user.id);
+      return this.workDayReports.filter(r => projectMemberIds.has(r.userId));
+    }
+    // user et viewer : uniquement leurs propres bilans
+    return this.workDayReports.filter(r => r.userId === user.id);
+  }
+
+  async submitWorkDayReport(report: Partial<WorkDayReport>): Promise<WorkDayReport> {
+    const user = this.getCurrentUser();
+    const orgId = this.getOrganization().id;
+    const now = new Date().toISOString();
+    const today = now.split('T')[0];
+
+    // Trouver l'équipe du user
+    const userTeam = this.teams.find(t => t.memberIds.includes(user.id));
+
+    const fullReport: WorkDayReport = {
+      id: report.id || `wdr-${user.id}-${today}`,
+      organizationId: orgId,
+      userId: user.id,
+      teamId: userTeam?.id,
+      date: today,
+      summary: report.summary || '',
+      tasksWorkedOn: report.tasksWorkedOn || [],
+      achievements: report.achievements || '',
+      challenges: report.challenges || '',
+      planTomorrow: report.planTomorrow || '',
+      workMinutes: report.workMinutes || 0,
+      breakMinutes: report.breakMinutes || 0,
+      startTime: report.startTime,
+      endTime: report.endTime,
+      status: 'submitted',
+      submittedAt: now,
+      visibleTo: [],
+      createdAt: report.createdAt || now,
+      updatedAt: now
+    };
+
+    if (isFirebaseConfigured) {
+      await db.upsertWorkDayReport(fullReport);
+    } else {
+      this.workDayReports = [fullReport, ...this.workDayReports.filter(r => r.id !== fullReport.id)];
+    }
+
+    await this.logAudit('Bilan Journalier Soumis', 'report', fullReport.id, 'Soumission', `Bilan soumis pour ${today}`);
+    this.notify();
+    return fullReport;
+  }
+
+  async saveWorkDayReportDraft(report: Partial<WorkDayReport>): Promise<WorkDayReport> {
+    const user = this.getCurrentUser();
+    const orgId = this.getOrganization().id;
+    const now = new Date().toISOString();
+    const today = now.split('T')[0];
+
+    const userTeam = this.teams.find(t => t.memberIds.includes(user.id));
+
+    const fullReport: WorkDayReport = {
+      id: report.id || `wdr-${user.id}-${today}`,
+      organizationId: orgId,
+      userId: user.id,
+      teamId: userTeam?.id,
+      date: today,
+      summary: report.summary || '',
+      tasksWorkedOn: report.tasksWorkedOn || [],
+      achievements: report.achievements || '',
+      challenges: report.challenges || '',
+      planTomorrow: report.planTomorrow || '',
+      workMinutes: report.workMinutes || 0,
+      breakMinutes: report.breakMinutes || 0,
+      startTime: report.startTime,
+      endTime: report.endTime,
+      status: 'draft',
+      visibleTo: [],
+      createdAt: report.createdAt || now,
+      updatedAt: now
+    };
+
+    if (isFirebaseConfigured) {
+      await db.upsertWorkDayReport(fullReport);
+    } else {
+      this.workDayReports = [fullReport, ...this.workDayReports.filter(r => r.id !== fullReport.id)];
+    }
+
+    this.notify();
+    return fullReport;
   }
 
   getTaskComments(taskId: string): Comment[] {
@@ -368,9 +523,16 @@ class AppStore {
     const today = new Date().toISOString().split('T')[0];
     const nowHHMM = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
-    let record = this.attendanceRecords.find((r) => r.userId === user.id && r.date === today);
+    // Vérifier si la journée est déjà terminée
+    const existingRecord = this.attendanceRecords.find((r) => r.userId === user.id && r.date === today);
+    if (existingRecord?.status === 'completed') {
+      throw new Error('Votre journée est déjà terminée. Attendez demain à l\'heure de début pour pointer à nouveau.');
+    }
+
+    let record = existingRecord;
 
     if (!record) {
+      // Premier démarrage de la journée : on crée un nouveau record
       record = {
         id: `att-${user.id}-${today}`,
         userId: user.id,
@@ -382,7 +544,18 @@ class AppStore {
         status: 'working',
         summary: summary || 'Journée démarrée'
       };
+    } else if (record.status === 'completed') {
+      // Redémarrage après une journée terminée : on garde l'historique
+      // mais on réinitialise les champs de timing pour la nouvelle session
+      record.status = 'working';
+      record.startTime = nowHHMM;
+      record.endTime = undefined;
+      record.breakStartTime = undefined;
+      record.totalWorkMinutes = 0;
+      record.totalBreakMinutes = 0;
+      record.summary = summary || 'Journée redémarrée';
     } else {
+      // Reprendre une journée en cours (working ou on_break)
       record.status = 'working';
       if (summary) record.summary = summary;
     }
@@ -445,7 +618,7 @@ class AppStore {
       record.endTime = nowHHMM;
       if (summary) record.summary = summary;
 
-      // BUG FIX: calculate actual work duration from startTime instead of hardcoding 420 minutes
+      // Calcul du temps de travail déclaré (startTime → endTime - pauses)
       if (record.startTime) {
         const [sh, sm] = record.startTime.split(':').map(Number);
         const startMinutes = sh * 60 + sm;
@@ -454,6 +627,27 @@ class AppStore {
         const totalElapsed = Math.max(0, endMinutes - startMinutes);
         record.totalWorkMinutes = Math.max(0, totalElapsed - record.totalBreakMinutes);
       }
+
+      // Détection d'inactivité : comparer lastActiveAt avec startTime
+      // Si le dernier heartbeat est vieux de +15 min, le temps est "estimé"
+      const lastActive = user.lastActiveAt ? new Date(user.lastActiveAt) : null;
+      const now = new Date();
+      if (lastActive) {
+        const minutesSinceLastActive = (now.getTime() - lastActive.getTime()) / 60000;
+        if (minutesSinceLastActive > 15) {
+          record.timeEstimated = true;
+          // Période d'inactivité détectée
+          if (!record.inactivePeriods) record.inactivePeriods = [];
+          record.inactivePeriods.push({
+            start: lastActive.toISOString(),
+            end: now.toISOString(),
+            minutes: Math.round(minutesSinceLastActive)
+          });
+        } else {
+          record.timeEstimated = false;
+        }
+      }
+      record.lastHeartbeatAt = user.lastActiveAt;
     }
 
     if (isFirebaseConfigured) {
@@ -465,13 +659,19 @@ class AppStore {
       if (uIdx !== -1) this.users[uIdx].presenceStatus = 'offline';
     }
 
-    await this.logAudit('Fin Journée', 'attendance', record?.id || 'att-end', 'Pointage Sortie', `Pointé à ${nowHHMM}`);
+    await this.logAudit('Fin Journée', 'attendance', record?.id || 'att-end', 'Pointage Sortie', `Pointé à ${nowHHMM}${record?.timeEstimated ? ' (temps estimé)' : ''}`);
     this.notify();
   }
 
   // ---------- Task Operations ----------
 
   async createTask(taskData: Omit<Task, 'id' | 'organizationId' | 'createdAt' | 'updatedAt'>): Promise<Task> {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === taskData.projectId);
+    if (!canCreateTask(user, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de créer une tâche dans ce projet.');
+    }
     const orgId = this.getOrganization().id;
 
     if (isFirebaseConfigured) {
@@ -506,6 +706,13 @@ class AppStore {
   }
 
   async updateTask(taskId: string, updates: Partial<Task>) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    const task = this.tasks.find((t) => t.id === taskId);
+    const proj = task ? this.projects.find((p) => p.id === task.projectId) : undefined;
+    if (!canEditTask(user, task?.assigneeIds || [], proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de modifier cette tâche.');
+    }
     if (isFirebaseConfigured) {
       await db.updateTask(taskId, updates);
       const task = this.tasks.find((t) => t.id === taskId);
@@ -523,6 +730,12 @@ class AppStore {
   async updateTaskStatus(taskId: string, newStatus: TaskStatus, blockerReason?: string) {
     const task = this.tasks.find((t) => t.id === taskId);
     if (!task) return;
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === task.projectId);
+    if (!canEditTask(user, task.assigneeIds, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de modifier cette tâche.');
+    }
     const oldStatus = task.status;
 
     const updates: Partial<Task> = { status: newStatus, updatedAt: new Date().toISOString() };
@@ -544,6 +757,12 @@ class AppStore {
   async submitTaskForReview(taskId: string) {
     const task = this.tasks.find((t) => t.id === taskId);
     if (!task) return;
+    // SÉCURITÉ : Vérifier l'autorisation (assigné ou éditeur du projet)
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === task.projectId);
+    if (!canEditTask(user, task.assigneeIds, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de soumettre cette tâche.');
+    }
 
     if (isFirebaseConfigured) {
       await db.updateTask(taskId, { status: 'In Review', updatedAt: new Date().toISOString() });
@@ -561,6 +780,12 @@ class AppStore {
   async approveTask(taskId: string, validationComment?: string) {
     const task = this.tasks.find((t) => t.id === taskId);
     if (!task) return;
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === task.projectId);
+    if (!canApproveTask(user, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation d\'approuver cette tâche.');
+    }
     const now = new Date().toISOString();
 
     const updates: Partial<Task> = {
@@ -588,6 +813,12 @@ class AppStore {
   async rejectTask(taskId: string, feedback: string) {
     const task = this.tasks.find((t) => t.id === taskId);
     if (!task) return;
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === task.projectId);
+    if (!canApproveTask(user, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de rejeter cette tâche.');
+    }
 
     const updates: Partial<Task> = {
       status: 'In Progress',
@@ -611,6 +842,12 @@ class AppStore {
   async toggleSubtask(taskId: string, subtaskId: string) {
     const task = this.tasks.find((t) => t.id === taskId);
     if (!task) return;
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === task.projectId);
+    if (!canEditTask(user, task.assigneeIds, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de modifier cette tâche.');
+    }
     const sub = task.subtasks.find((s) => s.id === subtaskId);
     if (!sub) return;
 
@@ -630,6 +867,12 @@ class AppStore {
   async addSubtask(taskId: string, title: string) {
     const task = this.tasks.find((t) => t.id === taskId);
     if (!task) return;
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === task.projectId);
+    if (!canEditTask(user, task.assigneeIds, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de modifier cette tâche.');
+    }
     const newSub: Subtask = { id: `sub-${Date.now()}`, title, completed: false };
     const updatedSubtasks = [...task.subtasks, newSub];
 
@@ -674,6 +917,11 @@ class AppStore {
   // ---------- Team Operations ----------
 
   async createTeam(teamData: Omit<Team, 'id' | 'organizationId' | 'createdAt'>): Promise<Team> {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    if (!canCreateTeam(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de créer une équipe.');
+    }
     const orgId = this.getOrganization().id;
 
     if (isFirebaseConfigured) {
@@ -710,6 +958,12 @@ class AppStore {
   }
 
   async updateTeam(teamId: string, updates: Partial<Team>) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    const team = this.teams.find((t) => t.id === teamId);
+    if (!canEditTeam(user, team)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de modifier cette équipe.');
+    }
     if (isFirebaseConfigured) {
       await db.updateTeam(teamId, updates);
       const team = this.teams.find((t) => t.id === teamId);
@@ -724,6 +978,11 @@ class AppStore {
   }
 
   async deleteTeam(teamId: string) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    if (!canDeleteTeam(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de supprimer cette équipe.');
+    }
     const team = this.teams.find((t) => t.id === teamId);
     if (isFirebaseConfigured) {
       // Remove teamId from all members
@@ -751,8 +1010,13 @@ class AppStore {
   }
 
   async addTeamMember(teamId: string, userId: string) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const currentUser = this.getCurrentUser();
     const team = this.teams.find((t) => t.id === teamId);
     if (!team) return;
+    if (!canManageTeamMembers(currentUser, team)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de gérer les membres de cette équipe.');
+    }
     if (team.memberIds.includes(userId)) return;
     const newMemberIds = [...team.memberIds, userId];
 
@@ -776,8 +1040,13 @@ class AppStore {
   }
 
   async removeTeamMember(teamId: string, userId: string) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const currentUser = this.getCurrentUser();
     const team = this.teams.find((t) => t.id === teamId);
     if (!team) return;
+    if (!canManageTeamMembers(currentUser, team)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de gérer les membres de cette équipe.');
+    }
     const newMemberIds = team.memberIds.filter((id) => id !== userId);
 
     if (isFirebaseConfigured) {
@@ -799,19 +1068,37 @@ class AppStore {
     this.notify();
   }
 
+  // SÉCURITÉ : Whitelist des champs qu'un user peut modifier sur son propre profil
+  // JAMAIS : role, organizationId, teamIds, email, createdAt
+  private static readonly ALLOWED_PROFILE_FIELDS: ReadonlySet<string> = new Set([
+    'firstName',
+    'lastName',
+    'avatar',
+    'jobTitle'
+  ]);
+
   async updateCurrentUserProfile(updates: Partial<User>) {
+    // SÉCURITÉ : Filtrer les champs sensibles pour empêcher l'auto-promotion
     const user = this.getCurrentUser();
+    const filteredUpdates: Partial<User> = {};
+    for (const [key, value] of Object.entries(updates)) {
+      if (AppStore.ALLOWED_PROFILE_FIELDS.has(key)) {
+        (filteredUpdates as any)[key] = value;
+      }
+      // Les champs sensibles (role, organizationId, teamIds, email) sont IGNORÉS
+    }
+
     if (isFirebaseConfigured) {
-      await db.updateUser(user.id, updates);
+      await db.updateUser(user.id, filteredUpdates);
     }
     // Update the users array so all components see the change
     const idx = this.users.findIndex((u) => u.id === user.id);
     if (idx !== -1) {
-      this.users[idx] = { ...this.users[idx], ...updates };
+      this.users[idx] = { ...this.users[idx], ...filteredUpdates };
     }
-    this.currentUser = { ...user, ...updates };
+    this.currentUser = { ...user, ...filteredUpdates };
     // Sync back to AuthContext so useAuth().currentUser updates too
-    if (this.onProfileUpdate) this.onProfileUpdate(updates);
+    if (this.onProfileUpdate) this.onProfileUpdate(filteredUpdates);
     this.notify();
   }
 
@@ -904,6 +1191,11 @@ class AppStore {
   }
 
   async createProject(projData: Omit<Project, 'id' | 'organizationId' | 'createdAt' | 'updatedAt' | 'weightedProgress'>): Promise<Project> {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    if (!canCreateProject(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de créer un projet.');
+    }
     const orgId = this.getOrganization().id;
 
     if (isFirebaseConfigured) {
@@ -927,9 +1219,14 @@ class AppStore {
   }
 
   async updateProject(projectId: string, updates: Partial<Project>) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === projectId);
+    if (!canEditProject(user, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de modifier ce projet.');
+    }
     if (isFirebaseConfigured) {
       await db.updateProject(projectId, updates);
-      const proj = this.projects.find((p) => p.id === projectId);
       if (proj) await this.logAudit('Projet Modifié', 'project', projectId, proj.name, 'Champs mis à jour');
       return;
     }
@@ -941,6 +1238,11 @@ class AppStore {
   }
 
   async deleteProject(projectId: string) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    if (!canDeleteProject(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de supprimer ce projet.');
+    }
     const proj = this.projects.find((p) => p.id === projectId);
     if (isFirebaseConfigured) {
       await db.deleteProject(projectId);
@@ -954,7 +1256,13 @@ class AppStore {
   }
 
   async deleteTask(taskId: string) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
     const task = this.tasks.find((t) => t.id === taskId);
+    const proj = task ? this.projects.find((p) => p.id === task.projectId) : undefined;
+    if (!canDeleteTask(user, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de supprimer cette tâche.');
+    }
     if (isFirebaseConfigured) {
       await db.deleteTask(taskId);
       await this.logAudit('Tâche Supprimée', 'task', taskId, task?.title || taskId);
@@ -967,6 +1275,11 @@ class AppStore {
   }
 
   async deleteObjective(objId: string) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    if (!canDeleteObjective(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de supprimer cet objectif.');
+    }
     const obj = this.objectives.find((o) => o.id === objId);
     if (isFirebaseConfigured) {
       await db.deleteObjective(objId);
@@ -981,6 +1294,11 @@ class AppStore {
   // ---------- Objectives / OKRs ----------
 
   async createObjective(objData: Omit<Objective, 'id' | 'organizationId' | 'createdAt'>): Promise<Objective> {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    if (!canCreateObjective(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de créer un objectif.');
+    }
     const orgId = this.getOrganization().id;
 
     if (isFirebaseConfigured) {
@@ -1023,6 +1341,11 @@ class AppStore {
   // ---------- Daily Reports ----------
 
   async generateDailyReport(teamId?: string): Promise<DailyReport> {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    if (!canGenerateOrgReport(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de générer un rapport.');
+    }
     const orgId = this.getOrganization().id;
     const today = new Date().toISOString().split('T')[0];
     const nowStr = today;
@@ -1094,14 +1417,25 @@ class AppStore {
   }
 
   async sendReportEmail(reportId: string) {
+    // SÉCURITÉ : Vérifier l'autorisation
+    const user = this.getCurrentUser();
+    if (!canGenerateOrgReport(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation d\'envoyer un rapport.');
+    }
     const rep = this.reports.find((r) => r.id === reportId);
     if (!rep) return;
 
     // Call backend to dispatch email via Resend
     try {
+      // SÉCURITÉ : Envoyer le token Firebase pour l'authentification serveur
+      const { auth } = await import('./firebase');
+      const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
       await fetch('/api/reports/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
+        },
         body: JSON.stringify({
           reportId: rep.id,
           recipients: rep.recipients,

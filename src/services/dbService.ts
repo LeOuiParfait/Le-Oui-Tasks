@@ -33,7 +33,8 @@ import type {
   TaskDifficulty,
   ProjectHealth,
   PresenceStatus,
-  UserRole
+  UserRole,
+  WorkDayReport
 } from '../types';
 
 /**
@@ -53,7 +54,8 @@ const COLLECTIONS = {
   notifications: 'notifications',
   auditLogs: 'auditLogs',
   reports: 'reports',
-  comments: 'comments'
+  comments: 'comments',
+  workDayReports: 'workDayReports'
 } as const;
 
 // ---------- Helpers ----------
@@ -93,6 +95,73 @@ function stripUndefined<T extends Record<string, any>>(obj: T): T {
   }
   return result as T;
 }
+
+// SÉCURITÉ : Allowlist de champs — ne garder que les champs autorisés
+// Empêche le mass assignment de champs sensibles (role, organizationId, etc.)
+function pickAllowed<T extends Record<string, any>>(obj: T, allowedFields: ReadonlySet<string>): Partial<T> {
+  const result: Record<string, any> = {};
+  for (const key of allowedFields) {
+    if (key in obj && obj[key] !== undefined) {
+      result[key] = obj[key];
+    }
+  }
+  return result as Partial<T>;
+}
+
+// SÉCURITÉ : Allowlists pour chaque type d'entité
+// Ces champs sont les SEULS qu'un client peut modifier via les fonctions update*
+const USER_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
+  'firstName', 'lastName', 'avatar', 'jobTitle',
+  'presenceStatus', 'lastActiveAt', 'lastSessionId'
+  // JAMAIS: role, organizationId, teamIds, email, createdAt
+]);
+
+const ORG_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
+  'name', 'industry', 'logo', 'workingHours', 'workingDays', 'timezone',
+  'reportEmailRecipients'
+  // JAMAIS: createdAt, id
+]);
+
+const TEAM_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
+  'name', 'description', 'managerId', 'memberIds'
+  // JAMAIS: organizationId, createdAt
+]);
+
+const PROJECT_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
+  'name', 'description', 'ownerId', 'ownerIds', 'memberIds', 'viewerIds',
+  'members', 'status', 'priority', 'health', 'startDate', 'endDate',
+  'dueDate', 'tags', 'coverImage', 'color', 'weightedProgress',
+  'teamId', 'progress', 'updatedAt'
+  // JAMAIS: organizationId, createdAt
+]);
+
+const TASK_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
+  'title', 'description', 'status', 'priority', 'assigneeId', 'assigneeIds',
+  'dueDate', 'tags', 'subtasks', 'weight', 'projectId', 'teamId',
+  'completedAt', 'reviewedBy', 'reviewedAt', 'reviewNotes', 'attachments',
+  'estimatedHours', 'actualHours', 'updatedAt'
+  // JAMAIS: organizationId, createdAt
+]);
+
+const OBJECTIVE_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
+  'title', 'description', 'progress', 'targetDate', 'status',
+  'ownerId', 'teamId', 'category', 'updatedAt'
+  // JAMAIS: organizationId, createdAt
+]);
+
+const ATTENDANCE_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
+  'date', 'startTime', 'endTime', 'breakStartTime', 'breakEndTime',
+  'totalWorkMinutes', 'totalBreakMinutes', 'status', 'summary',
+  'timeEstimated', 'inactiveMinutes', 'lastSessionId'
+  // JAMAIS: userId, organizationId, createdAt
+]);
+
+const REPORT_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
+  'date', 'generatedBy', 'attendanceSummary', 'tasksSummary',
+  'blockers', 'prioritiesTomorrow', 'recipients', 'teamId',
+  'sentAt', 'sentBy'
+  // JAMAIS: organizationId, createdAt
+]);
 
 // ---------- Users ----------
 
@@ -141,7 +210,24 @@ export async function updateUserPresence(userId: string, status: PresenceStatus)
 
 export async function updateUserRole(userId: string, role: UserRole): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
-  await updateDoc(doc(db, COLLECTIONS.users, userId), { role });
+  // SÉCURITÉ : Appeler l'endpoint serveur qui vérifie l'autorisation
+  const { auth } = await import('./firebase');
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Non authentifié.');
+  const idToken = await currentUser.getIdToken();
+  const origin = window.location.origin;
+  const response = await fetch(`${origin}/api/auth/update-role`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`
+    },
+    body: JSON.stringify({ targetUserId: userId, newRole: role })
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({ error: 'Erreur inconnue.' }));
+    throw new Error(data.error || 'Erreur lors de la mise à jour du rôle.');
+  }
 }
 
 // ---------- Organization ----------
@@ -168,7 +254,8 @@ export async function fetchOrganization(orgId: string): Promise<Organization | n
 
 export async function updateOrganization(orgId: string, updates: Partial<Organization>): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
-  await updateDoc(doc(db, COLLECTIONS.organizations, orgId), stripUndefined(updates as any));
+  const safe = pickAllowed(updates as Record<string, any>, ORG_UPDATABLE_FIELDS);
+  await updateDoc(doc(db, COLLECTIONS.organizations, orgId), stripUndefined(safe as any));
 }
 
 // ---------- Teams ----------
@@ -215,7 +302,8 @@ export async function createTeam(team: Omit<Team, 'id' | 'organizationId' | 'cre
 
 export async function updateTeam(teamId: string, updates: Partial<Team>): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
-  await updateDoc(doc(db, COLLECTIONS.teams, teamId), stripUndefined(updates as any));
+  const safe = pickAllowed(updates as Record<string, any>, TEAM_UPDATABLE_FIELDS);
+  await updateDoc(doc(db, COLLECTIONS.teams, teamId), stripUndefined(safe as any));
 }
 
 export async function deleteTeam(teamId: string): Promise<void> {
@@ -225,7 +313,8 @@ export async function deleteTeam(teamId: string): Promise<void> {
 
 export async function updateUser(userId: string, updates: Partial<User>): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
-  await updateDoc(doc(db, COLLECTIONS.users, userId), stripUndefined(updates as any));
+  const safe = pickAllowed(updates as Record<string, any>, USER_UPDATABLE_FIELDS);
+  await updateDoc(doc(db, COLLECTIONS.users, userId), stripUndefined(safe as any));
 }
 
 // ---------- Projects ----------
@@ -302,8 +391,9 @@ export async function createProject(project: Omit<Project, 'id' | 'organizationI
 
 export async function updateProject(projectId: string, updates: Partial<Project>): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
+  const safe = pickAllowed(updates as Record<string, any>, PROJECT_UPDATABLE_FIELDS);
   await updateDoc(doc(db, COLLECTIONS.projects, projectId), stripUndefined({
-    ...updates,
+    ...safe,
     updatedAt: serverTimestamp()
   }));
 }
@@ -376,8 +466,9 @@ export async function createTask(task: Omit<Task, 'id' | 'organizationId' | 'cre
 
 export async function updateTask(taskId: string, updates: Partial<Task>): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
+  const safe = pickAllowed(updates as Record<string, any>, TASK_UPDATABLE_FIELDS);
   await updateDoc(doc(db, COLLECTIONS.tasks, taskId), stripUndefined({
-    ...updates,
+    ...safe,
     updatedAt: serverTimestamp()
   }));
 }
@@ -437,7 +528,8 @@ export async function createObjective(obj: Omit<Objective, 'id' | 'organizationI
 
 export async function updateObjective(objId: string, updates: Partial<Objective>): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
-  await updateDoc(doc(db, COLLECTIONS.objectives, objId), stripUndefined(updates as any));
+  const safe = pickAllowed(updates as Record<string, any>, OBJECTIVE_UPDATABLE_FIELDS);
+  await updateDoc(doc(db, COLLECTIONS.objectives, objId), stripUndefined(safe as any));
 }
 
 export async function deleteObjective(objId: string): Promise<void> {
@@ -487,7 +579,54 @@ export async function upsertAttendance(record: AttendanceRecord): Promise<void> 
 
 export async function updateAttendance(recordId: string, updates: Partial<AttendanceRecord>): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
-  await updateDoc(doc(db, COLLECTIONS.attendance, recordId), stripUndefined(updates as any));
+  const safe = pickAllowed(updates as Record<string, any>, ATTENDANCE_UPDATABLE_FIELDS);
+  await updateDoc(doc(db, COLLECTIONS.attendance, recordId), stripUndefined(safe as any));
+}
+
+// ---------- WorkDayReports (bilans journaliers individuels) ----------
+
+export function mapWorkDayReport(id: string, data: DocumentData): WorkDayReport {
+  return {
+    id,
+    organizationId: data.organizationId || '',
+    userId: data.userId || '',
+    teamId: data.teamId || undefined,
+    date: data.date || new Date().toISOString().split('T')[0],
+    summary: data.summary || '',
+    tasksWorkedOn: data.tasksWorkedOn || [],
+    achievements: data.achievements || '',
+    challenges: data.challenges || '',
+    planTomorrow: data.planTomorrow || '',
+    workMinutes: data.workMinutes || 0,
+    breakMinutes: data.breakMinutes || 0,
+    startTime: data.startTime || undefined,
+    endTime: data.endTime || undefined,
+    status: data.status || 'draft',
+    submittedAt: data.submittedAt || undefined,
+    visibleTo: data.visibleTo || [],
+    createdAt: tsToIso(data.createdAt) || new Date().toISOString(),
+    updatedAt: tsToIso(data.updatedAt) || new Date().toISOString()
+  };
+}
+
+export async function fetchWorkDayReports(orgId: string): Promise<WorkDayReport[]> {
+  if (!isFirebaseConfigured) return [];
+  const q = query(collection(db, COLLECTIONS.workDayReports), where('organizationId', '==', orgId));
+  const snap = await getDocs(q);
+  return snap.docs.map(d => mapWorkDayReport(d.id, d.data()));
+}
+
+export function subscribeWorkDayReports(orgId: string, cb: (reports: WorkDayReport[]) => void): () => void {
+  if (!isFirebaseConfigured) { cb([]); return () => {}; }
+  const q = query(collection(db, COLLECTIONS.workDayReports), where('organizationId', '==', orgId));
+  return onSnapshot(q, (snap) => {
+    cb(snap.docs.map(d => mapWorkDayReport(d.id, d.data())));
+  });
+}
+
+export async function upsertWorkDayReport(report: WorkDayReport): Promise<void> {
+  if (!isFirebaseConfigured) notConfigured();
+  await setDoc(doc(db, COLLECTIONS.workDayReports, report.id), stripUndefined(report as any), { merge: true });
 }
 
 // ---------- Notifications ----------
@@ -617,7 +756,8 @@ export async function createReportDb(report: Omit<DailyReport, 'id'>): Promise<D
 
 export async function updateReport(reportId: string, updates: Partial<DailyReport>): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
-  await updateDoc(doc(db, COLLECTIONS.reports, reportId), stripUndefined(updates as any));
+  const safe = pickAllowed(updates as Record<string, any>, REPORT_UPDATABLE_FIELDS);
+  await updateDoc(doc(db, COLLECTIONS.reports, reportId), stripUndefined(safe as any));
 }
 
 // ---------- Audit Logs ----------
@@ -660,8 +800,15 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
   formData.append('avatar', file);
   formData.append('userId', userId);
 
+  // Récupérer le token Firebase pour l'authentification serveur
+  const { auth } = await import('./firebase');
+  const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+
   const response = await fetch('/api/upload-avatar', {
     method: 'POST',
+    headers: {
+      ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
+    },
     body: formData
   });
 

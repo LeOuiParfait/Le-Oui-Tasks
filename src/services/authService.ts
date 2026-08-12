@@ -15,12 +15,6 @@ import {
   type User as FirebaseUser
 } from 'firebase/auth';
 import {
-  initializeApp,
-  deleteApp,
-  getApps,
-  type FirebaseApp
-} from 'firebase/app';
-import {
   doc,
   getDoc,
   setDoc,
@@ -271,66 +265,53 @@ export async function createMemberAsAdmin(
     throw new Error('Firebase n\'est pas configuré.');
   }
 
-  // Check if email is already used
-  const existing = await findUserByEmail(input.email);
-  if (existing) {
-    throw new Error('Un compte avec cet e-mail existe déjà.');
+  // SÉCURITÉ : Appeler l'endpoint serveur qui vérifie l'autorisation
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Vous devez être connecté pour effectuer cette action.');
   }
+  const idToken = await currentUser.getIdToken();
 
-  // Use a secondary app instance to create the user without logging out the admin
-  const secondaryAppName = 'secondary-' + Date.now();
-  let secondaryApp: FirebaseApp;
-  try {
-    secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
-  } catch {
-    // If a secondary app already exists, reuse it
-    const existing = getApps().find((a) => a.name === secondaryAppName);
-    if (!existing) throw new Error('Impossible d\'initialiser l\'instance secondaire Firebase.');
-    secondaryApp = existing;
-  }
-
-  const secondaryAuth = getAuth(secondaryApp);
-
-  try {
-    const cred = await createUserWithEmailAndPassword(
-      secondaryAuth,
-      input.email,
-      input.password
-    );
-    const newUid = cred.user.uid;
-
-    await updateProfile(cred.user, {
-      displayName: `${input.firstName} ${input.lastName}`
-    });
-
-    const now = new Date().toISOString();
-    const userData: Omit<User, 'id'> = {
-      organizationId: orgId,
+  const origin = window.location.origin;
+  const response = await fetch(`${origin}/api/auth/create-member`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`
+    },
+    body: JSON.stringify({
+      email: input.email,
+      password: input.password,
       firstName: input.firstName,
       lastName: input.lastName,
-      email: input.email,
-      avatar: input.avatar || '',
       role: input.role,
-      teamIds: [],
       jobTitle: input.jobTitle,
-      presenceStatus: 'offline',
-      lastActiveAt: now,
-      createdAt: now
-    };
-    await setDoc(doc(db, USERS_COLLECTION, newUid), stripUndefined({
-      ...userData,
-      createdAt: serverTimestamp(),
-      lastActiveAt: serverTimestamp()
-    }));
+      avatar: input.avatar,
+      orgId
+    })
+  });
 
-    // Sign out of the secondary instance
-    await signOut(secondaryAuth);
-
-    return { id: newUid, ...userData };
-  } finally {
-    // Clean up the secondary app instance
-    try { await deleteApp(secondaryApp); } catch {}
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({ error: 'Erreur inconnue.' }));
+    throw new Error(data.error || 'Erreur lors de la création du membre.');
   }
+
+  const data = await response.json();
+  const now = new Date().toISOString();
+  return {
+    id: data.userId,
+    organizationId: orgId,
+    firstName: input.firstName,
+    lastName: input.lastName,
+    email: input.email,
+    avatar: input.avatar || '',
+    role: input.role,
+    teamIds: [],
+    jobTitle: input.jobTitle || '',
+    presenceStatus: 'offline',
+    lastActiveAt: now,
+    createdAt: now
+  };
 }
 
 /** Find a user by email (used for invitation / member lookup). */
@@ -354,9 +335,15 @@ export async function sendCustomResetLink(email: string, firstName?: string, use
   }
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  // Récupérer le token Firebase pour l'authentification serveur
+  const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+
   const response = await fetch(`${origin}/api/auth/reset-link`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
+    },
     body: JSON.stringify({ email, firstName, appName: 'Le Oui Parfait', userId })
   });
   const data = await response.json();

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import {
-  FolderKanban, Plus, Calendar, ChevronRight, Pencil, Trash2
+  FolderKanban, Plus, Calendar, ChevronRight, Pencil, Trash2, UserCog
 } from 'lucide-react';
-import { Project, User, Task, ProjectHealth, Team } from '../../types';
+import { Project, User, Task, ProjectHealth, Team, ProjectMember } from '../../types';
 import { CreateProjectModal } from './CreateProjectModal';
+import { ProjectMembersModal } from './ProjectMembersModal';
+import { canEditProject, canManageProjectMembers } from '../../services/permissions';
 
 interface ProjectsViewProps {
   projects: Project[];
@@ -24,8 +26,11 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [managingMembersFor, setManagingMembersFor] = useState<Project | null>(null);
 
-  const canManage = currentUser.role === 'super_admin';
+  // Permissions par projet
+  const canManageProject = (project: Project) => canEditProject(currentUser, project);
+  const canManageProjectMembersFor = (project: Project) => canManageProjectMembers(currentUser, project);
 
   const getHealthBadge = (health: ProjectHealth) => {
     switch (health) {
@@ -47,6 +52,26 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
     }
   };
 
+  const handleUpdateMembers = async (members: ProjectMember[], newOwnerId: string) => {
+    if (managingMembersFor) {
+      await onUpdateProject(managingMembersFor.id, {
+        members,
+        ownerId: newOwnerId,
+        memberIds: members.map(m => m.userId),
+        ownerIds: members.filter(m => m.role === 'owner').map(m => m.userId),
+        viewerIds: members.filter(m => m.role === 'viewer').map(m => m.userId)
+      });
+    }
+  };
+
+  // Filtrer les projets visibles selon les permissions
+  const visibleProjects = projects.filter(p => {
+    // super_admin et admin voient tout
+    if (currentUser.role === 'super_admin' || currentUser.role === 'admin') return true;
+    // Les autres voient uniquement les projets où ils sont membres
+    return p.memberIds.includes(currentUser.id);
+  });
+
   return (
     <div className="space-y-4 sm:space-y-6 pb-12 max-w-6xl mx-auto">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -54,7 +79,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
           <h1 className="text-xl sm:text-2xl font-extrabold text-stone-900 tracking-tight">Projets</h1>
           <p className="text-xs text-stone-500 mt-0.5">Suivez la progression des projets pondérée par la complexité des tâches.</p>
         </div>
-        {canManage && (
+        {(currentUser.role === 'super_admin' || currentUser.role === 'admin' || currentUser.role === 'manager') && (
           <button
             onClick={() => setShowCreateModal(true)}
             className="px-4 py-2 bg-brand hover:bg-brand-dark text-white font-semibold text-xs rounded-lg transition-colors flex items-center gap-2 shrink-0"
@@ -65,19 +90,25 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
         )}
       </div>
 
-      {projects.length === 0 ? (
+      {visibleProjects.length === 0 ? (
         <div className="bg-white rounded-xl border border-stone-200 p-12 text-center">
           <FolderKanban className="w-12 h-12 text-stone-300 mx-auto mb-3" />
-          <p className="text-sm text-stone-500">Aucun projet pour le moment.</p>
-          {canManage && <p className="text-xs text-stone-400 mt-1">Cliquez sur « Nouveau Projet » pour commencer.</p>}
+          <p className="text-sm text-stone-500">
+            {projects.length === 0 ? 'Aucun projet pour le moment.' : 'Vous n\'êtes membre d\'aucun projet.'}
+          </p>
+          {(currentUser.role === 'super_admin' || currentUser.role === 'admin' || currentUser.role === 'manager') && (
+            <p className="text-xs text-stone-400 mt-1">Cliquez sur « Nouveau Projet » pour commencer.</p>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
-          {projects.map((project) => {
+          {visibleProjects.map((project) => {
             const owner = users.find((u) => u.id === project.ownerId);
             const projectTasks = tasks.filter((t) => t.projectId === project.id);
             const completedCount = projectTasks.filter((t) => t.status === 'Completed').length;
             const health = getHealthBadge(project.health);
+            const canManageThis = canManageProject(project);
+            const canManageMembersThis = canManageProjectMembersFor(project);
 
             return (
               <div
@@ -91,24 +122,35 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                       <span className={`w-1.5 h-1.5 rounded-full ${health.dot}`} />
                       {health.label}
                     </span>
-                    {canManage && (
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {canManageMembersThis && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); setEditingProject(project); }}
-                          className="p-1.5 rounded-lg text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors"
-                          title="Modifier"
+                          onClick={(e) => { e.stopPropagation(); setManagingMembersFor(project); }}
+                          className="p-1.5 rounded-lg text-stone-400 hover:text-brand hover:bg-brand-50 transition-colors"
+                          title="Gérer les membres"
                         >
-                          <Pencil className="w-3.5 h-3.5" />
+                          <UserCog className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); if (confirm(`Supprimer « ${project.name} » et toutes ses tâches ?`)) onDeleteProject(project.id); }}
-                          className="p-1.5 rounded-lg text-stone-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          title="Supprimer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
+                      )}
+                      {canManageThis && (
+                        <>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditingProject(project); }}
+                            className="p-1.5 rounded-lg text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors"
+                            title="Modifier"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); if (confirm(`Supprimer « ${project.name} » et toutes ses tâches ?`)) onDeleteProject(project.id); }}
+                            className="p-1.5 rounded-lg text-stone-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="Supprimer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   <h3 className="text-base font-bold text-stone-900 group-hover:text-brand transition-colors mb-1">
@@ -139,6 +181,12 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                       </div>
                     ) : null}
                     <span className="font-medium text-stone-700">{owner ? `${owner.firstName} ${owner.lastName}` : 'Non assigné'}</span>
+                    {/* Badge nombre de membres */}
+                    {project.members.length > 1 && (
+                      <span className="text-[10px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded-full">
+                        +{project.members.length - 1}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 text-stone-500 font-medium">
                     <span className="flex items-center gap-1">
@@ -163,6 +211,16 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
           project={editingProject}
           onClose={() => { setShowCreateModal(false); setEditingProject(null); }}
           onSubmit={editingProject ? handleUpdate : handleCreate}
+        />
+      )}
+
+      {managingMembersFor && (
+        <ProjectMembersModal
+          project={managingMembersFor}
+          users={users}
+          currentUser={currentUser}
+          onClose={() => setManagingMembersFor(null)}
+          onUpdateMembers={handleUpdateMembers}
         />
       )}
     </div>

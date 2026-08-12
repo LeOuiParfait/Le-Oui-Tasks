@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { store } from './services/store';
 import { useAuth } from './services/AuthContext';
 import { AuthScreen } from './components/auth/AuthScreen';
@@ -29,6 +29,8 @@ import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { TeamsView } from './components/teams/TeamsView';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { Loader2 } from 'lucide-react';
+import { canViewAllTasks } from './services/permissions';
+import { usePresenceTracking } from './services/usePresenceTracking';
 
 export default function App() {
   const { firebaseUid, currentUser, organization, initializing } = useAuth();
@@ -84,6 +86,12 @@ function Workspace() {
   const [notifications, setNotifications] = useState<NotifType[]>(store.getNotifications());
   const [reports, setReports] = useState<DailyReport[]>(store.getReports());
 
+  // Suivi de présence intelligent (heartbeat + inactivité + beforeunload)
+  const today = new Date().toISOString().split('T')[0];
+  const myTodayRecord = attendanceRecords.find((r) => r.userId === currentUser?.id && r.date === today);
+  const isCurrentlyWorking = myTodayRecord?.status === 'working' || myTodayRecord?.status === 'on_break';
+  usePresenceTracking(currentUser?.id, isCurrentlyWorking);
+
   const [currentView, setCurrentView] = useState<string>('kanban');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
@@ -119,10 +127,17 @@ function Workspace() {
     analytics: 'Analytique de Gestion'
   };
 
-  const completedTasksCount = tasks.filter((t) => t.status === 'Completed').length;
+  // Filtrer les tâches selon les permissions
+  const visibleTasks = useMemo(() => {
+    if (canViewAllTasks(currentUser)) return tasks;
+    // User simple : uniquement ses tâches assignées
+    return tasks.filter(t => t.assigneeIds.includes(currentUser.id));
+  }, [tasks, currentUser]);
+
+  const completedTasksCount = visibleTasks.filter((t) => t.status === 'Completed').length;
   const activeTeamMembersCount = users.filter((u) => u.presenceStatus === 'online' || u.presenceStatus === 'away').length;
   // BUG FIX: compute real upcoming deadlines instead of hardcoded 12
-  const upcomingDeadlinesCount = tasks.filter((t) => {
+  const upcomingDeadlinesCount = visibleTasks.filter((t) => {
     if (t.status === 'Completed') return false;
     const due = new Date(t.dueDate);
     const now = new Date();
@@ -143,7 +158,7 @@ function Workspace() {
         onOpenCreateProject={() => setCurrentView('projects')}
         onOpenUserSwitch={() => setShowSettings(true)}
         onSignOut={signOut}
-        tasksCount={tasks.length}
+        tasksCount={visibleTasks.length}
       />
 
       {/* Main Workspace Area */}
@@ -176,7 +191,7 @@ function Workspace() {
           {/* View Routing */}
           {currentView === 'kanban' || currentView === 'tasks' ? (
             <KanbanBoard
-              tasks={tasks}
+              tasks={visibleTasks}
               users={users}
               projects={projects}
               onUpdateTaskStatus={(taskId, status) => store.updateTaskStatus(taskId, status)}
@@ -190,7 +205,7 @@ function Workspace() {
           ) : currentView === 'mywork' ? (
             <MyWorkView
               currentUser={currentUser}
-              tasks={tasks}
+              tasks={visibleTasks}
               objectives={objectives}
               attendanceRecord={myTodayAttendance}
               onOpenTaskDetail={setSelectedTask}
@@ -202,6 +217,8 @@ function Workspace() {
               currentUser={currentUser}
               users={users}
               attendanceRecords={attendanceRecords}
+              organization={organization}
+              tasks={tasks}
               onStartWorkday={() => store.startWorkday()}
               onEndWorkday={() => store.endWorkday()}
               onToggleBreak={() => store.toggleBreak()}
@@ -241,6 +258,8 @@ function Workspace() {
           ) : currentView === 'reports' ? (
             <DailyReportsView
               reports={reports}
+              workDayReports={store.getVisibleWorkDayReports()}
+              users={users}
               currentUser={currentUser}
               onGenerateReport={() => store.generateDailyReport()}
               onSendReportEmail={(rId) => store.sendReportEmail(rId)}
