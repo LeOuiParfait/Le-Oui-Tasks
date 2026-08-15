@@ -30,7 +30,7 @@ export const AuthScreen: React.FC = () => {
 // ============== SHARED BRANDING ==============
 
 const BrandLogo: React.FC<{ className?: string }> = ({ className = '' }) => (
-  <img src="/logo-horizontal.png" alt="Le Oui Parfait" className={`h-10 w-auto ${className}`} />
+  <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className={`h-10 w-auto ${className}`} />
 );
 
 // ============== SETUP SCREEN ==============
@@ -121,7 +121,7 @@ const SetupScreen: React.FC = () => {
         </div>
 
         <div className="relative z-10 text-xs text-stone-300">
-          © {new Date().getFullYear()} Le Oui Parfait. Tous droits réservés.
+          © {new Date().getFullYear()} LE LOUI PARFAIT. Tous droits réservés.
         </div>
       </div>
 
@@ -165,7 +165,7 @@ const SetupScreen: React.FC = () => {
             </FormField>
 
             <FormField label="Nom de l'organisation" icon={<Building2 className="w-4 h-4" />}>
-              <input type="text" value={organizationName} onChange={(e) => setOrganizationName(e.target.value)} className="form-input" placeholder="Le Oui Parfait" />
+              <input type="text" value={organizationName} onChange={(e) => setOrganizationName(e.target.value)} className="form-input" placeholder="LE LOUI PARFAIT" />
             </FormField>
 
             <div className="grid grid-cols-2 gap-3">
@@ -294,7 +294,7 @@ const LoginScreen: React.FC = () => {
         </div>
 
         <div className="relative z-10 text-xs text-stone-300">
-          © {new Date().getFullYear()} Le Oui Parfait. Tous droits réservés.
+          © {new Date().getFullYear()} LE LOUI PARFAIT. Tous droits réservés.
         </div>
       </div>
 

@@ -115,7 +115,8 @@ function mapOrganization(id: string, data: any): Organization {
     workingHours: data.workingHours || { start: '09:00', end: '18:00' },
     workingDays: data.workingDays || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
     defaultWorkdayDurationHours: data.defaultWorkdayDurationHours || 8,
-    reportEmailRecipients: data.reportEmailRecipients || []
+    reportEmailRecipients: data.reportEmailRecipients || [],
+    includeAdminsInReports: data.includeAdminsInReports ?? false
   };
 }
 
@@ -185,7 +186,8 @@ export async function initializeSystem(input: SetupInput): Promise<AuthSession> 
     workingHours: { start: '09:00', end: '18:00' },
     workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
     defaultWorkdayDurationHours: 8,
-    reportEmailRecipients: [input.email]
+    reportEmailRecipients: [input.email],
+    includeAdminsInReports: false
   };
   await setDoc(doc(db, ORGS_COLLECTION, orgId), stripUndefined({
     ...orgData,
@@ -344,7 +346,7 @@ export async function sendCustomResetLink(email: string, firstName?: string, use
       'Content-Type': 'application/json',
       ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
     },
-    body: JSON.stringify({ email, firstName, appName: 'Le Oui Parfait', userId })
+    body: JSON.stringify({ email, firstName, appName: 'LE LOUI PARFAIT', userId })
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Erreur serveur.');
@@ -362,10 +364,21 @@ export async function resetPassword(email: string): Promise<void> {
   if (!isFirebaseConfigured) {
     throw new Error('Firebase n\'est pas configuré.');
   }
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
   try {
-    await sendPasswordResetEmail(auth, email, resetPasswordSettings);
+    const response = await fetch(`${origin}/api/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+
+    const data = await response.json().catch(() => ({ error: 'Erreur serveur.' }));
+    if (!response.ok) {
+      throw new Error(data.error || 'Erreur lors de la demande de réinitialisation.');
+    }
   } catch (error: any) {
-    console.error('[Auth] Error sending password reset email:', error);
+    console.error('[Auth] Error sending password reset request:', error);
     throw new Error(`Erreur lors de l'envoi de l'email de réinitialisation: ${error.message}`);
   }
 }

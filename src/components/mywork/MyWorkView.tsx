@@ -4,7 +4,6 @@ import {
   Clock,
   AlertTriangle,
   Send,
-  Target,
   ChevronRight,
   Calendar,
   Circle,
@@ -231,36 +230,8 @@ export const MyWorkView: React.FC<MyWorkViewProps> = ({
           )}
         </div>
 
-        {/* Right col: objectives + reflection */}
+        {/* Right col: reflection */}
         <div className="space-y-6">
-          {/* Objectives */}
-          <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
-            <div className="px-5 py-4 border-b border-stone-100 flex items-center gap-2">
-              <Target className="w-4 h-4 text-brand" />
-              <h3 className="text-sm font-bold text-stone-900">Objectifs</h3>
-            </div>
-            <div className="p-4 space-y-3">
-              {objectives.slice(0, 3).map((obj) => {
-                const pct = Math.min(100, Math.round((obj.currentValue / obj.targetValue) * 100));
-                return (
-                  <div key={obj.id}>
-                    <p className="text-xs font-semibold text-stone-800 mb-1.5 truncate">{obj.title}</p>
-                    <div className="w-full bg-stone-100 h-1.5 rounded-full overflow-hidden mb-1">
-                      <div className="bg-brand h-full rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
-                    </div>
-                    <div className="flex justify-between text-[10px] text-stone-400">
-                      <span>{obj.currentValue}/{obj.targetValue} {obj.unit}</span>
-                      <span className="font-semibold text-brand">{pct}%</span>
-                    </div>
-                  </div>
-                );
-              })}
-              {objectives.length === 0 && (
-                <p className="text-xs text-stone-400 text-center py-4">Aucun objectif défini.</p>
-              )}
-            </div>
-          </div>
-
           {/* Daily reflection */}
           <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-stone-100">

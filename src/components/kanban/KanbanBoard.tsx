@@ -15,6 +15,7 @@ import {
   ArrowUpDown,
   Plus,
   Layers,
+  ChevronLeft,
   ChevronRight
 } from 'lucide-react';
 import { Task, User, TaskStatus, Project } from '../../types';
@@ -39,10 +40,11 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onOpenCreateTask,
   onToggleSubtask
 }) => {
-  const [activeTab, setActiveTab] = useState<'kanban' | 'board' | 'list' | 'calendar'>('kanban');
+  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'calendar'>('board');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [selectedAssigneeId, setSelectedAssigneeId] = useState<string>('all');
+  const [calendarDate, setCalendarDate] = useState(new Date());
 
   // Columns per screenshot: Todo, Inprogress, Review, Completed
   const columns: { id: TaskStatus; label: string; dotColor: string }[] = [
@@ -64,6 +66,17 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     return matchesSearch && matchesProject && matchesAssignee;
   });
 
+  const tasksByDate = React.useMemo(() => {
+    const map: Record<string, Task[]> = {};
+    for (const t of filteredTasks) {
+      if (!t.dueDate) continue;
+      const d = t.dueDate.split('T')[0];
+      if (!map[d]) map[d] = [];
+      map[d].push(t);
+    }
+    return map;
+  }, [filteredTasks]);
+
   // Drag and drop handler
   const handleDragEnd = (result: DropResult) => {
     const { destination, source, draggableId } = result;
@@ -80,18 +93,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-stone-200/80 mb-6 shrink-0">
         {/* Navigation View Tabs */}
         <div className="flex items-center space-x-1 bg-stone-100/80 p-1 rounded-xl">
-          <button
-            onClick={() => setActiveTab('kanban')}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'kanban'
-                ? 'bg-white text-brand shadow-xs'
-                : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <KanbanIcon className="w-3.5 h-3.5" />
-            <span>Kanban</span>
-          </button>
-
           <button
             onClick={() => setActiveTab('board')}
             className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
@@ -169,7 +170,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       </div>
 
       {/* Main Kanban / View Content */}
-      {activeTab === 'kanban' || activeTab === 'board' ? (
+      {activeTab === 'board' ? (
         <DragDropContext onDragEnd={handleDragEnd}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 flex-1 overflow-y-auto pb-8 pr-1 no-scrollbar">
             {columns.map((col) => {
@@ -315,13 +316,91 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
           </div>
         </div>
       ) : (
-        /* Calendar View Placeholder */
-        <div className="bg-white rounded-xl border border-stone-200 p-8 text-center text-stone-500 flex-1 flex flex-col items-center justify-center">
-          <Calendar className="w-12 h-12 text-stone-300 mb-3" />
-          <h3 className="font-bold text-stone-900 text-base mb-1">Planning & Calendrier des Échéances</h3>
-          <p className="text-xs text-stone-500 max-w-sm">
-            Vue calendrier interactive avec suivi des livrables et jalons planifiés.
-          </p>
+        /* Calendar View */
+        <div className="bg-white rounded-xl border border-stone-200 p-4 sm:p-6 flex-1 flex flex-col min-h-0">
+          <div className="flex items-center justify-between mb-4 shrink-0">
+            <h3 className="text-sm font-bold text-stone-900">
+              {calendarDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+            </h3>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1))}
+                className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-600"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setCalendarDate(new Date())}
+                className="text-xs font-semibold text-brand hover:underline"
+              >
+                Aujourd'hui
+              </button>
+              <button
+                onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 1))}
+                className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-600"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-auto flex-1 -mx-4 sm:-mx-6 px-4 sm:px-6">
+            <div className="min-w-[700px]">
+              <div className="grid grid-cols-7 gap-1 mb-2 text-center">
+                {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((d) => (
+                  <div key={d} className="text-[10px] font-semibold text-stone-500 uppercase">{d}</div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7 gap-1 min-h-[420px]">
+            {(() => {
+              const year = calendarDate.getFullYear();
+              const month = calendarDate.getMonth();
+              const first = new Date(year, month, 1);
+              const offset = (first.getDay() + 6) % 7;
+              const start = new Date(year, month, 1 - offset);
+              const days: Date[] = [];
+              for (let i = 0; i < 42; i++) {
+                days.push(new Date(start));
+                start.setDate(start.getDate() + 1);
+              }
+              return days.map((d, i) => {
+                const iso = d.toISOString().split('T')[0];
+                const dayTasks = tasksByDate[iso] || [];
+                const isCurrentMonth = d.getMonth() === month;
+                const isToday = iso === new Date().toISOString().split('T')[0];
+                return (
+                  <div
+                    key={i}
+                    className={`min-h-[80px] border rounded-lg p-1.5 flex flex-col gap-1 transition-colors ${
+                      isCurrentMonth ? 'bg-white border-stone-100' : 'bg-stone-50 border-stone-100/50'
+                    } ${isToday ? 'ring-1 ring-brand' : ''}`}
+                  >
+                    <span className={`text-[10px] font-medium ${isCurrentMonth ? 'text-stone-700' : 'text-stone-400'}`}>
+                      {d.getDate()}
+                    </span>
+                    <div className="flex flex-col gap-1 overflow-hidden">
+                      {dayTasks.slice(0, 3).map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => onOpenTaskDetail(t)}
+                          className="text-[9px] text-left truncate bg-brand-50 text-brand rounded px-1.5 py-0.5 hover:bg-brand-100"
+                          title={t.title}
+                        >
+                          {t.title}
+                        </button>
+                      ))}
+                      {dayTasks.length > 3 && (
+                        <span className="text-[9px] text-stone-500 pl-1">+{dayTasks.length - 3}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+          </div>
+          </div>
         </div>
       )}
     </div>

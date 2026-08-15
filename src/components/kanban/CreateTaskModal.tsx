@@ -62,7 +62,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       weight,
       subtasks: subtasks.map((st, i) => ({ id: `sub-new-${i}`, title: st, completed: false })),
       labels: [priority],
-      attachments: []
+      attachments: [],
+      memberIds: [],
+      teamIds: []
     });
     onClose();
   };

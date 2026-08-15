@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
-  X, Clock, UserCheck, MessageSquare, Send, CheckCircle2, XCircle, Plus, Trash2, Flag, Calendar, ShieldAlert
+  X, Clock, UserCheck, MessageSquare, Send, CheckCircle2, XCircle, Plus, Trash2, Flag, Calendar, ShieldAlert, Pencil
 } from 'lucide-react';
-import { Task, User, Project, Comment, TaskStatus } from '../../types';
-import { canApproveTask, canDeleteTask } from '../../services/permissions';
+import { Task, User, Project, Comment, TaskStatus, Subtask } from '../../types';
+import { canApproveTask, canDeleteTask, canEditTask } from '../../services/permissions';
 import { store } from '../../services/store';
 
 interface TaskDetailModalProps {
@@ -13,20 +13,161 @@ interface TaskDetailModalProps {
   currentUser: User;
   comments: Comment[];
   onClose: () => void;
+  onUpdateTask: (taskId: string, updates: Partial<Task>) => Promise<void>;
   onUpdateStatus: (taskId: string, newStatus: TaskStatus, blockerReason?: string) => void;
   onSubmitForReview: (taskId: string) => void;
   onApproveTask: (taskId: string, comment?: string) => void;
   onRejectTask: (taskId: string, feedback: string) => void;
   onToggleSubtask: (taskId: string, subtaskId: string) => void;
   onAddSubtask: (taskId: string, title: string) => void;
+  onEditSubtask: (taskId: string, subtaskId: string, title: string) => Promise<void>;
+  onDeleteSubtask: (taskId: string, subtaskId: string) => Promise<void>;
   onAddComment: (taskId: string, content: string) => void;
+  onEditComment: (commentId: string, taskId: string, content: string) => Promise<void>;
+  onDeleteComment: (commentId: string, taskId: string) => Promise<void>;
   onDeleteTask: (taskId: string) => void;
 }
 
+const Avatar: React.FC<{ user?: User; size?: string }> = ({ user, size = 'w-5 h-5' }) => {
+  if (!user) return null;
+  if (user.avatar) return <img src={user.avatar} alt="" className={`${size} rounded-full object-cover`} />;
+  return (
+    <div className={`${size} rounded-full bg-brand flex items-center justify-center text-white text-[10px] font-semibold`}>
+      {user.firstName.charAt(0)}{user.lastName.charAt(0)}
+    </div>
+  );
+};
+
+const CommentRow: React.FC<{
+  comment: Comment;
+  author: User | undefined;
+  currentUser: User;
+  task: Task;
+  onEdit: (commentId: string, taskId: string, content: string) => Promise<void>;
+  onDelete: (commentId: string, taskId: string) => Promise<void>;
+}> = ({ comment, author, currentUser, task, onEdit, onDelete }) => {
+  const [editing, setEditing] = useState(false);
+  const [content, setContent] = useState(comment.content);
+  const canEdit = comment.authorId === currentUser.id || currentUser.role === 'super_admin' || currentUser.role === 'admin';
+
+  return (
+    <div className="flex gap-3 p-3 bg-stone-50/80 rounded-xl border border-stone-100 group">
+      <Avatar user={author} size="w-8 h-8" />
+      <div className="flex-1">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs font-bold text-stone-900">{author?.firstName} {author?.lastName}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-stone-400">{new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            {canEdit && !editing && (
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={() => setEditing(true)} className="p-1 rounded text-stone-400 hover:text-stone-900 hover:bg-stone-100">
+                  <Pencil className="w-3 h-3" />
+                </button>
+                <button onClick={() => onDelete(comment.id, task.id)} className="p-1 rounded text-stone-400 hover:text-red-600 hover:bg-red-50">
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        {editing ? (
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter' && content.trim()) {
+                  await onEdit(comment.id, task.id, content.trim());
+                  setEditing(false);
+                }
+                if (e.key === 'Escape') {
+                  setContent(comment.content);
+                  setEditing(false);
+                }
+              }}
+              autoFocus
+              className="flex-1 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-brand"
+            />
+          </div>
+        ) : (
+          <p className="text-xs text-stone-700 leading-relaxed">{comment.content}</p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const SubtaskRow: React.FC<{
+  task: Task;
+  subtask: Subtask;
+  canEdit: boolean;
+  onToggle: () => void;
+  onEdit: (taskId: string, subId: string, title: string) => Promise<void>;
+  onDelete: (taskId: string, subId: string) => Promise<void>;
+}> = ({ task, subtask, canEdit, onToggle, onEdit, onDelete }) => {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(subtask.title);
+
+  return (
+    <div className="flex items-center justify-between p-3 rounded-lg bg-stone-50 hover:bg-stone-100 border border-stone-100 transition-colors group">
+      <div className="flex items-center gap-3 flex-1" onClick={onToggle}>
+        <input
+          type="checkbox"
+          checked={subtask.completed}
+          readOnly
+          className="w-4 h-4 text-brand rounded border-stone-300 focus:ring-brand"
+        />
+        {editing ? (
+          <input
+            type="text"
+            value={title}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={async (e) => {
+              if (e.key === 'Enter' && title.trim()) {
+                await onEdit(task.id, subtask.id, title.trim());
+                setEditing(false);
+              }
+              if (e.key === 'Escape') {
+                setTitle(subtask.title);
+                setEditing(false);
+              }
+            }}
+            autoFocus
+            className="flex-1 bg-white border border-stone-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-brand"
+          />
+        ) : (
+          <span className={`text-xs font-medium ${subtask.completed ? 'line-through text-stone-400' : 'text-stone-900'}`}>
+            {subtask.title}
+          </span>
+        )}
+      </div>
+      {canEdit && !editing && (
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+            className="p-1 rounded text-stone-400 hover:text-stone-900 hover:bg-stone-100"
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(task.id, subtask.id); }}
+            className="p-1 rounded text-stone-400 hover:text-red-600 hover:bg-red-50"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   task, users, projects, currentUser, comments,
-  onClose, onUpdateStatus, onSubmitForReview, onApproveTask, onRejectTask,
-  onToggleSubtask, onAddSubtask, onAddComment, onDeleteTask
+  onClose, onUpdateTask, onUpdateStatus, onSubmitForReview, onApproveTask, onRejectTask,
+  onToggleSubtask, onAddSubtask, onEditSubtask, onDeleteSubtask,
+  onAddComment, onEditComment, onDeleteComment, onDeleteTask
 }) => {
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [newCommentText, setNewCommentText] = useState('');
@@ -35,6 +176,24 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [blockerReasonInput, setBlockerReasonInput] = useState(task?.blockerReason || '');
   const [showRejectBox, setShowRejectBox] = useState(false);
   const [showBlockerBox, setShowBlockerBox] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<Partial<Task>>({});
+
+  useEffect(() => {
+    if (task) {
+      setDraft({
+        title: task.title,
+        description: task.description,
+        dueDate: task.dueDate,
+        priority: task.priority,
+        difficulty: task.difficulty,
+        projectId: task.projectId,
+        assigneeIds: [...task.assigneeIds],
+        reviewerId: task.reviewerId,
+      });
+    }
+  }, [task]);
 
   // Subscribe to real-time comments when task opens
   useEffect(() => {
@@ -54,6 +213,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
   const canApprove = canApproveTask(currentUser);
   const canDelete = canDeleteTask(currentUser);
+  const canEdit = canEditTask(currentUser, task.assigneeIds, project);
 
   const handleSubtaskSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,16 +247,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     setShowBlockerBox(false);
   };
 
-  const Avatar: React.FC<{ user?: User; size?: string }> = ({ user, size = 'w-5 h-5' }) => {
-    if (!user) return null;
-    if (user.avatar) return <img src={user.avatar} alt="" className={`${size} rounded-full object-cover`} />;
-    return (
-      <div className={`${size} rounded-full bg-brand flex items-center justify-center text-white text-[10px] font-semibold`}>
-        {user.firstName.charAt(0)}{user.lastName.charAt(0)}
-      </div>
-    );
-  };
-
   return (
     <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
       <div className="bg-white rounded-xl max-w-3xl w-full shadow-xl overflow-hidden my-8 flex flex-col max-h-[90vh]">
@@ -111,6 +261,14 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </span>
           </div>
           <div className="flex items-center gap-1">
+            {canEdit && !isEditing && (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand-50 rounded-lg transition-colors"
+              >
+                Modifier
+              </button>
+            )}
             {canDelete && (
               <button
                 onClick={() => { if (confirm(`Supprimer la tâche « ${task.title} » ?`)) { onDeleteTask(task.id); onClose(); } }}
@@ -127,6 +285,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         </div>
 
         {/* Body */}
+        {!isEditing ? (
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5 no-scrollbar">
           <div>
             <div className="flex items-center gap-2 text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">
@@ -251,12 +410,15 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </div>
             <div className="space-y-2 mb-3">
               {task.subtasks.map((st) => (
-                <div key={st.id} onClick={() => onToggleSubtask(task.id, st.id)} className="flex items-center justify-between p-3 rounded-lg bg-stone-50 hover:bg-stone-100 cursor-pointer border border-stone-100 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <input type="checkbox" checked={st.completed} onChange={() => {}} className="w-4 h-4 text-brand rounded border-stone-300 focus:ring-brand" />
-                    <span className={`text-xs font-medium ${st.completed ? 'line-through text-stone-400' : 'text-stone-900'}`}>{st.title}</span>
-                  </div>
-                </div>
+                <SubtaskRow
+                  key={st.id}
+                  task={task}
+                  subtask={st}
+                  canEdit={canEdit}
+                  onToggle={() => onToggleSubtask(task.id, st.id)}
+                  onEdit={onEditSubtask}
+                  onDelete={onDeleteSubtask}
+                />
               ))}
             </div>
             <form onSubmit={handleSubtaskSubmit} className="flex items-center gap-2">
@@ -275,21 +437,17 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               <span>Commentaires ({comments.length})</span>
             </h4>
             <div className="space-y-3 mb-4">
-              {comments.map((c) => {
-                const author = users.find((u) => u.id === c.authorId);
-                return (
-                  <div key={c.id} className="flex gap-3 p-3 bg-stone-50/80 rounded-xl border border-stone-100">
-                    <Avatar user={author} size="w-8 h-8" />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-bold text-stone-900">{author?.firstName} {author?.lastName}</span>
-                        <span className="text-[10px] text-stone-400">{new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                      <p className="text-xs text-stone-700 leading-relaxed">{c.content}</p>
-                    </div>
-                  </div>
-                );
-              })}
+              {comments.map((c) => (
+                <CommentRow
+                  key={c.id}
+                  comment={c}
+                  author={users.find((u) => u.id === c.authorId)}
+                  currentUser={currentUser}
+                  task={task}
+                  onEdit={onEditComment}
+                  onDelete={onDeleteComment}
+                />
+              ))}
             </div>
             <form onSubmit={handleCommentSubmit} className="flex items-center gap-2">
               <input type="text" placeholder="Écrire un commentaire..." value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} className="flex-1 bg-white border border-stone-200 rounded-lg px-4 py-2.5 text-xs focus:outline-none focus:border-brand shadow-sm" />
@@ -300,6 +458,155 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </form>
           </div>
         </div>
+        ) : (
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 no-scrollbar">
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Titre</label>
+            <input
+              type="text"
+              value={draft.title ?? ''}
+              onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
+              className="w-full bg-white border border-stone-200 rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-brand"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Description</label>
+            <textarea
+              value={draft.description ?? ''}
+              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+              rows={4}
+              className="w-full bg-white border border-stone-200 rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-brand resize-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-stone-600 mb-1">Projet</label>
+              <select
+                value={draft.projectId ?? ''}
+                onChange={(e) => setDraft((d) => ({ ...d, projectId: e.target.value }))}
+                className="w-full bg-white border border-stone-200 rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-brand"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-stone-600 mb-1">Échéance</label>
+              <input
+                type="date"
+                value={draft.dueDate ?? ''}
+                onChange={(e) => setDraft((d) => ({ ...d, dueDate: e.target.value }))}
+                className="w-full bg-white border border-stone-200 rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-brand"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-stone-600 mb-1">Priorité</label>
+              <select
+                value={draft.priority ?? 'Medium'}
+                onChange={(e) => setDraft((d) => ({ ...d, priority: e.target.value as Task['priority'] }))}
+                className="w-full bg-white border border-stone-200 rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-brand"
+              >
+                <option value="Low">Basse</option>
+                <option value="Medium">Moyenne</option>
+                <option value="High">Haute</option>
+                <option value="Urgent">Urgente</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-stone-600 mb-1">Difficulté</label>
+              <select
+                value={draft.difficulty ?? 'Medium'}
+                onChange={(e) => setDraft((d) => ({ ...d, difficulty: e.target.value as Task['difficulty'] }))}
+                className="w-full bg-white border border-stone-200 rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-brand"
+              >
+                <option value="Easy">Facile</option>
+                <option value="Medium">Moyen</option>
+                <option value="Hard">Difficile</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Assignés</label>
+            <div className="flex flex-wrap gap-2 p-3 border border-stone-200 rounded-lg bg-stone-50">
+              {users.map((u) => {
+                const selected = draft.assigneeIds?.includes(u.id) ?? false;
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => setDraft((d) => {
+                      const ids = new Set(d.assigneeIds ?? []);
+                      if (ids.has(u.id)) ids.delete(u.id); else ids.add(u.id);
+                      return { ...d, assigneeIds: Array.from(ids) };
+                    })}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${selected ? 'bg-brand text-white border-brand' : 'bg-white text-stone-600 border-stone-200'}`}
+                  >
+                    {u.firstName} {u.lastName}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Réviseur</label>
+            <select
+              value={draft.reviewerId ?? ''}
+              onChange={(e) => setDraft((d) => ({ ...d, reviewerId: e.target.value || undefined }))}
+              className="w-full bg-white border border-stone-200 rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-brand"
+            >
+              <option value="">Aucun</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              onClick={() => setIsEditing(false)}
+              className="px-4 py-2 text-xs font-medium text-stone-600 hover:text-stone-900"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={async () => {
+                if (!draft.title?.trim()) return;
+                setSaving(true);
+                try {
+                  await onUpdateTask(task.id, {
+                    title: draft.title.trim(),
+                    description: draft.description,
+                    dueDate: draft.dueDate,
+                    priority: draft.priority,
+                    difficulty: draft.difficulty,
+                    projectId: draft.projectId,
+                    assigneeIds: draft.assigneeIds,
+                    reviewerId: draft.reviewerId,
+                    updatedAt: new Date().toISOString()
+                  });
+                  setIsEditing(false);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              disabled={saving}
+              className="px-4 py-2 bg-brand hover:bg-brand-dark text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+            >
+              {saving ? 'Enregistrement...' : 'Enregistrer'}
+            </button>
+          </div>
+        </div>
+        )}
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import { Lock, Check, AlertCircle, Loader2, Eye, EyeOff, ArrowRight, Mail } from
 
 // BrandLogo - logo horizontal en couleurs d'origine
 const BrandLogo = ({ className = 'h-12' }: { className?: string }) => (
-  <img src="/logo-horizontal.png" alt="Le Oui Parfait" className={className} />
+  <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className={className} />
 );
 
 // Vidéo d'arrière-plan (identique aux pages Auth)
@@ -136,8 +136,7 @@ export const ResetPasswordPage: React.FC = () => {
         <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center overflow-hidden">
           <AuthVideoBackground />
           <div className="relative z-10 text-center px-12">
-            <BrandLogo className="h-12 mx-auto mb-6" />
-            <h2 className="font-brand text-2xl text-white mb-3">Le Oui Parfait</h2>
+            <BrandLogo className="h-14 mx-auto mb-6" />
             <p className="text-white/80 text-sm">Vérification de votre lien...</p>
           </div>
         </div>
@@ -161,8 +160,7 @@ export const ResetPasswordPage: React.FC = () => {
         <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center overflow-hidden">
           <AuthVideoBackground />
           <div className="relative z-10 text-center px-12">
-            <BrandLogo className="h-12 mx-auto mb-6" />
-            <h2 className="font-brand text-2xl text-white mb-3">Le Oui Parfait</h2>
+            <BrandLogo className="h-14 mx-auto mb-6" />
             <p className="text-white/80 text-sm">Espace de travail collaboratif</p>
           </div>
         </div>
@@ -192,8 +190,7 @@ export const ResetPasswordPage: React.FC = () => {
         <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center overflow-hidden">
           <AuthVideoBackground />
           <div className="relative z-10 text-center px-12">
-            <BrandLogo className="h-12 mx-auto mb-6" />
-            <h2 className="font-brand text-2xl text-white mb-3">Le Oui Parfait</h2>
+            <BrandLogo className="h-14 mx-auto mb-6" />
             <p className="text-white/80 text-sm">Compte activé avec succès</p>
           </div>
         </div>
@@ -223,10 +220,7 @@ export const ResetPasswordPage: React.FC = () => {
       <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center overflow-hidden">
         <AuthVideoBackground />
         <div className="relative z-10 text-center px-12">
-          <BrandLogo className="h-12 mx-auto mb-6" />
-          <h2 className="font-brand text-3xl text-white mb-3 font-medium tracking-tight">
-            Le Oui Parfait
-          </h2>
+          <BrandLogo className="h-16 mx-auto mb-6" />
           <p className="text-white/80 text-sm leading-relaxed max-w-sm mx-auto">
             Votre espace de travail collaboratif. Définissez votre mot de passe pour accéder à votre compte.
           </p>
@@ -244,7 +238,7 @@ export const ResetPasswordPage: React.FC = () => {
           {/* Header */}
           <div className="text-center mb-6">
             <h1 className="text-2xl font-bold text-stone-900 mb-2 tracking-tight">
-              Bienvenue sur Le Oui Parfait
+              Bienvenue
             </h1>
             <p className="text-stone-600 text-sm leading-relaxed">
               Votre compte a été créé. Définissez maintenant votre mot de passe pour accéder à votre espace de travail.

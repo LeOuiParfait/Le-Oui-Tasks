@@ -1,12 +1,8 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ============================================================
-    // FONCTIONS UTILITAIRES
-    // ============================================================
-
+    // ───── Helpers auth / user ─────
     function isSignedIn() {
       return request.auth != null;
     }
@@ -19,118 +15,86 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(getUserId())).data;
     }
 
-    function getUserRole() {
-      return getUserData().role;
-    }
-
     function isSuperAdmin() {
-      return isSignedIn() && getUserRole() == 'super_admin';
+      return isSignedIn() && getUserData().role == 'super_admin';
     }
 
     function isAdmin() {
-      return isSignedIn() && (getUserRole() == 'super_admin' || getUserRole() == 'admin');
-    }
-
-    function isManager() {
-      return isSignedIn() && (getUserRole() == 'super_admin' || getUserRole() == 'admin' || getUserRole() == 'manager');
-    }
-
-    function isTeamLead() {
-      return isSignedIn() && (getUserRole() == 'super_admin' || getUserRole() == 'admin' || getUserRole() == 'manager' || getUserRole() == 'team_lead');
+      return isSignedIn() && (getUserData().role == 'super_admin' || getUserData().role == 'admin');
     }
 
     function belongsToOrg(orgId) {
       return isSignedIn() && getUserData().organizationId == orgId;
     }
 
+    // ───── Helpers project ─────
     function getProjectData(projectId) {
       return get(/databases/$(database)/documents/projects/$(projectId)).data;
     }
 
-    function getTaskProjectId(commentId) {
-      let task = get(/databases/$(database)/documents/tasks/$(get(/databases/$(database)/documents/comments/$(commentId)).data.taskId)).data;
-      return task.projectId;
+    function getTaskData(taskId) {
+      return get(/databases/$(database)/documents/tasks/$(taskId)).data;
     }
 
     function isProjectMember(projectData) {
-      return projectData.ownerId == getUserId() ||
-             getUserId() in projectData.memberIds;
+      return getUserId() == projectData.ownerId ||
+             (projectData.memberIds != null && getUserId() in projectData.memberIds) ||
+             (projectData.teamIds != null &&
+              getUserData().teamIds != null &&
+              projectData.teamIds.hasAny(getUserData().teamIds));
     }
 
     function isProjectEditor(projectData) {
-      return projectData.ownerId == getUserId() ||
-             getUserId() in projectData.ownerIds;
+      return getUserId() == projectData.ownerId ||
+             (projectData.editorIds != null && getUserId() in projectData.editorIds) ||
+             (projectData.memberIds != null && getUserId() in projectData.memberIds);
     }
 
     function isProjectContributor(projectData) {
-      return projectData.ownerId == getUserId() ||
-             (getUserId() in projectData.memberIds &&
-              !(getUserId() in projectData.viewerIds));
+      return getUserId() == projectData.ownerId ||
+             (projectData.memberIds != null &&
+              getUserId() in projectData.memberIds &&
+              (projectData.viewerIds == null || !(getUserId() in projectData.viewerIds)));
     }
 
-    // Vérifie si l'utilisateur manage une équipe qui contient targetUserId
-    function managesTeamOf(targetUserId) {
-      let myTeams = query(/databases/$(database)/documents/teams)
-        .where('organizationId', '==', getUserData().organizationId)
-        .where('managerId', '==', getUserId());
-      // Firestore rules ne supporte pas query() dans les fonctions custom de manière simple.
-      // On utilise une approche alternative : vérifier les teamIds du caller
-      // et les teamIds du target. Cette logique est complétée côté client.
-      // Pour les rules, on autorise les managers/team_leads à lire les attendance
-      // de leur org (le filtrage fin par équipe est fait côté client + server endpoint).
-      return getUserRole() == 'manager' || getUserRole() == 'team_lead';
-    }
-
-    // ============================================================
-    // USERS — Protection stricte contre l'auto-promotion
-    // ============================================================
+    // ───── Users ─────
     match /users/{userId} {
-      allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
+      // L'utilisateur peut toujours lire son propre document (rompt la récursion de getUserData)
+      allow read: if isSignedIn() &&
+                     (userId == getUserId() ||
+                      belongsToOrg(resource.data.organizationId));
 
-      // Self-update : champs NON sensibles uniquement
-      // EMPECHE: role, organizationId, teamIds, email
+      // Mise à jour de son propre profil, sauf le rôle
       allow update: if isSignedIn() &&
                        userId == getUserId() &&
-                       // Le rôle ne doit JAMAIS changer sur un self-update
-                       request.resource.data.role == resource.data.role &&
-                       // L'organisation ne doit JAMAIS changer sur un self-update
-                       request.resource.data.organizationId == resource.data.organizationId &&
-                       // Les teamIds ne doivent JAMAIS changer sur un self-update
-                       request.resource.data.teamIds == resource.data.teamIds &&
-                       // L'email ne doit JAMAIS changer sur un self-update
-                       request.resource.data.email == resource.data.email;
+                       request.resource.data.role == resource.data.role;
 
-      // Admin/super_admin peuvent tout faire sur les users de leur org
+      // Création / suppression / édition admin
       allow create, delete: if isSuperAdmin();
       allow update: if isSuperAdmin();
     }
 
-    // ============================================================
-    // ORGANIZATIONS — Seuls admin/super_admin peuvent modifier
-    // ============================================================
+    // ───── Organizations ─────
     match /organizations/{orgId} {
       allow read: if isSignedIn() && belongsToOrg(orgId);
-      allow update: if isAdmin() && belongsToOrg(orgId);
+      allow update: if isSuperAdmin() && belongsToOrg(orgId);
       allow create, delete: if isSuperAdmin();
     }
 
-    // ============================================================
-    // TEAMS — Admin uniquement pour écriture
-    // ============================================================
+    // ───── Teams ─────
     match /teams/{teamId} {
       allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
-      allow create, update, delete: if isAdmin() && belongsToOrg(request.resource.data.organizationId);
+      allow create, update, delete: if isSuperAdmin() &&
+                                      belongsToOrg(request.resource.data.organizationId);
     }
 
-    // ============================================================
-    // PROJECTS — Membership requis pour lecture, editor pour écriture
-    // ============================================================
+    // ───── Projects ─────
     match /projects/{projectId} {
-      allow read: if isSignedIn() &&
-                     belongsToOrg(resource.data.organizationId) &&
-                     (isSuperAdmin() || isProjectMember(resource.data));
+      // Lecture autorisée à tous les membres de l'org (filtrage côté client)
+      allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
 
-      allow create: if isAdmin() && belongsToOrg(request.resource.data.organizationId);
+      allow create: if isSuperAdmin() &&
+                      belongsToOrg(request.resource.data.organizationId);
 
       allow update: if isSignedIn() &&
                        belongsToOrg(resource.data.organizationId) &&
@@ -139,24 +103,27 @@ service cloud.firestore {
       allow delete: if isSuperAdmin() && belongsToOrg(resource.data.organizationId);
     }
 
-    // ============================================================
-    // TASKS — Project membership requis
-    // ============================================================
+    // ───── Tasks ─────
     match /tasks/{taskId} {
       allow read: if isSignedIn() &&
                      belongsToOrg(resource.data.organizationId) &&
-                     (isSuperAdmin() || isProjectMember(getProjectData(resource.data.projectId)));
+                     (isSuperAdmin() ||
+                      (resource.data.memberIds != null && getUserId() in resource.data.memberIds) ||
+                      (resource.data.assigneeIds != null && getUserId() in resource.data.assigneeIds) ||
+                      (resource.data.teamIds != null &&
+                       getUserData().teamIds != null &&
+                       resource.data.teamIds.hasAny(getUserData().teamIds)));
 
       allow create: if isSignedIn() &&
                        belongsToOrg(request.resource.data.organizationId) &&
-                       (isSuperAdmin() || isProjectContributor(getProjectData(request.resource.data.projectId)));
+                       (isSuperAdmin() ||
+                        isProjectContributor(getProjectData(request.resource.data.projectId)));
 
       allow update: if isSignedIn() &&
                        belongsToOrg(resource.data.organizationId) &&
                        (isSuperAdmin() ||
                         isProjectEditor(getProjectData(resource.data.projectId)) ||
-                        (resource.data.assigneeId == getUserId() &&
-                         isProjectMember(getProjectData(resource.data.projectId))));
+                        (resource.data.assigneeIds != null && getUserId() in resource.data.assigneeIds));
 
       allow delete: if isSignedIn() &&
                        belongsToOrg(resource.data.organizationId) &&
@@ -164,29 +131,19 @@ service cloud.firestore {
                         isProjectEditor(getProjectData(resource.data.projectId)));
     }
 
-    // ============================================================
-    // OBJECTIVES — Admin uniquement pour écriture
-    // ============================================================
+    // ───── Objectives ─────
     match /objectives/{objectiveId} {
       allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
-      allow create, update, delete: if isAdmin() && belongsToOrg(request.resource.data.organizationId);
+      allow create, update, delete: if isSuperAdmin() &&
+                                      belongsToOrg(request.resource.data.organizationId);
     }
 
-    // ============================================================
-    // ATTENDANCE — Self pour écriture, management pour lecture
-    // ============================================================
+    // ───── Attendance ─────
     match /attendance/{recordId} {
-      // Lecture : self, super_admin, admin, manager, team_lead
-      // (le filtrage fin par équipe est fait côté client via store)
       allow read: if isSignedIn() &&
                      belongsToOrg(resource.data.organizationId) &&
-                     (isSuperAdmin() ||
-                      resource.data.userId == getUserId() ||
-                      getUserRole() == 'admin' ||
-                      getUserRole() == 'manager' ||
-                      getUserRole() == 'team_lead');
+                     (isSuperAdmin() || resource.data.userId == getUserId());
 
-      // Écriture : uniquement le propriétaire, et l'userId ne doit pas changer
       allow create, update: if isSignedIn() &&
                                belongsToOrg(request.resource.data.organizationId) &&
                                request.resource.data.userId == getUserId();
@@ -194,86 +151,51 @@ service cloud.firestore {
       allow delete: if isSuperAdmin() && belongsToOrg(resource.data.organizationId);
     }
 
-    // ============================================================
-    // WORKDAYREPORTS — Self pour écriture, management pour lecture
-    // ============================================================
-    match /workDayReports/{reportId} {
-      // Lecture : self, super_admin, admin, manager, team_lead
-      allow read: if isSignedIn() &&
-                     belongsToOrg(resource.data.organizationId) &&
-                     (isSuperAdmin() ||
-                      resource.data.userId == getUserId() ||
-                      getUserRole() == 'admin' ||
-                      getUserRole() == 'manager' ||
-                      getUserRole() == 'team_lead');
-
-      // Écriture : uniquement le propriétaire
-      allow create, update: if isSignedIn() &&
-                               belongsToOrg(request.resource.data.organizationId) &&
-                               request.resource.data.userId == getUserId();
-
-      allow delete: if isSuperAdmin() && belongsToOrg(resource.data.organizationId);
-    }
-
-    // ============================================================
-    // NOTIFICATIONS — Self uniquement
-    // ============================================================
+    // ───── Notifications ─────
     match /notifications/{notificationId} {
       allow read, update, delete: if isSignedIn() && resource.data.userId == getUserId();
       allow create: if isSignedIn();
     }
 
-    // ============================================================
-    // REPORTS (rapports agrégés) — Lecture restreinte au management
-    // ============================================================
+    // ───── Reports (legacy + split) ─────
     match /reports/{reportId} {
-      // Lecture : uniquement admin, manager, team_lead (pas les users basic)
-      allow read: if isSignedIn() &&
-                     belongsToOrg(resource.data.organizationId) &&
-                     (isSuperAdmin() ||
-                      getUserRole() == 'admin' ||
-                      getUserRole() == 'manager' ||
-                      getUserRole() == 'team_lead');
-
+      allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
       allow create: if isSignedIn() && belongsToOrg(request.resource.data.organizationId);
-      allow update, delete: if isAdmin() && belongsToOrg(resource.data.organizationId);
+      allow update, delete: if isSuperAdmin() && belongsToOrg(resource.data.organizationId);
     }
 
-    // ============================================================
-    // COMMENTS — Project membership requis
-    // ============================================================
+    match /dailyReports/{id} {
+      allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
+      allow write: if isSuperAdmin() && belongsToOrg(request.resource.data.organizationId);
+    }
+
+    match /workDayReports/{id} {
+      allow read: if isSignedIn() && belongsToOrg(resource.data.organizationId);
+      allow write: if isSuperAdmin() && belongsToOrg(request.resource.data.organizationId);
+    }
+
+    // ───── Comments ─────
     match /comments/{commentId} {
       allow read: if isSignedIn() &&
                      (isSuperAdmin() ||
-                      isProjectMember(getProjectData(getTaskProjectId(commentId))));
+                      isProjectMember(getProjectData(getTaskData(resource.data.taskId).projectId)));
 
       allow create: if isSignedIn() &&
-                       isProjectMember(getProjectData(getTaskProjectId(commentId)));
+                       isProjectMember(getProjectData(getTaskData(request.resource.data.taskId).projectId));
 
       allow update, delete: if isSignedIn() &&
                                (isSuperAdmin() || resource.data.authorId == getUserId());
     }
 
-    // ============================================================
-    // AUDITLOGS — Lecture super_admin uniquement, création authentifiée
-    // ============================================================
+    // ───── Audit logs ─────
     match /auditLogs/{logId} {
       allow read: if isSuperAdmin();
       allow create: if isSignedIn();
       allow update, delete: if false;
     }
 
-    // ============================================================
-    // PASSWORDRESETS — Jamais accessible au client
-    // ============================================================
+    // ───── Password resets ─────
     match /passwordResets/{token} {
-      allow read, write: if false;
-    }
-
-    // ============================================================
-    // DEFAULT DENY — Toute collection non listée ci-dessus est refusée
-    // ============================================================
-    match /{document=**} {
       allow read, write: if false;
     }
   }

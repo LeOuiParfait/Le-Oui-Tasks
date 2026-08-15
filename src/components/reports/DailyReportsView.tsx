@@ -16,9 +16,11 @@ import {
   RotateCw,
   Loader2,
   Filter,
+  Trash2,
   User as UserIcon
 } from 'lucide-react';
 import { DailyReport, User, WorkDayReport } from '../../types';
+import { store } from '../../services/store';
 
 interface DailyReportsViewProps {
   reports: DailyReport[];
@@ -46,8 +48,10 @@ export const DailyReportsView: React.FC<DailyReportsViewProps> = ({
   const [isSending, setIsSending] = useState(false);
   const [sendNotice, setSendNotice] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'sent'>('all');
+  const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'team' | 'individual'>('team');
   const [selectedWorkDayReport, setSelectedWorkDayReport] = useState<WorkDayReport | null>(null);
+  const [submittingWdrId, setSubmittingWdrId] = useState<string | null>(null);
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
@@ -57,6 +61,27 @@ export const DailyReportsView: React.FC<DailyReportsViewProps> = ({
     setSelectedReport(newRep);
   };
 
+  const handleDeleteReport = async (e: React.MouseEvent, reportId: string) => {
+    e.stopPropagation();
+    setDeletingReportId(reportId);
+    try {
+      await store.deleteReport(reportId);
+      if (selectedReport?.id === reportId) setSelectedReport(null);
+    } finally {
+      setDeletingReportId(null);
+    }
+  };
+
+  const handleSubmitWorkDayReport = async (e: React.MouseEvent, wdr: WorkDayReport) => {
+    e.stopPropagation();
+    setSubmittingWdrId(wdr.id);
+    try {
+      await store.submitWorkDayReport(wdr);
+    } finally {
+      setSubmittingWdrId(null);
+    }
+  };
+
   const handleSendEmail = async (report?: DailyReport) => {
     const rep = report || selectedReport;
     if (!rep) return;
@@ -64,32 +89,14 @@ export const DailyReportsView: React.FC<DailyReportsViewProps> = ({
     setSendNotice(null);
 
     try {
-      // Récupérer le token Firebase
-      const { auth } = await import('../../services/firebase');
-      const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
-
-      const response = await fetch('/api/reports/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
-        },
-        body: JSON.stringify({
-          reportId: rep.id,
-          recipients: rep.recipients,
-          reportData: rep
-        })
-      });
-
-      const data = await response.json();
-      onSendReportEmail(rep.id);
+      await onSendReportEmail(rep.id);
       setIsSending(false);
-      setSendNotice(data.message || 'Rapport envoyé avec succès !');
+      setSendNotice('Rapport envoyé avec succès !');
       setTimeout(() => setSendNotice(null), 4000);
     } catch (err: any) {
       setIsSending(false);
-      setSendNotice('Échec de l\'envoi. Vérifiez la connexion réseau.');
-      setTimeout(() => setSendNotice(null), 4000);
+      setSendNotice(err.message || 'Échec de l\'envoi. Vérifiez la configuration e-mail.');
+      setTimeout(() => setSendNotice(null), 6000);
     }
   };
 
@@ -103,9 +110,7 @@ export const DailyReportsView: React.FC<DailyReportsViewProps> = ({
     });
   }, [reports, selectedMonth, selectedYear, statusFilter]);
 
-  const activeReport = selectedReport && filteredReports.find(r => r.id === selectedReport.id)
-    ? selectedReport
-    : filteredReports[0] || null;
+  const activeReport = filteredReports.find(r => r.id === selectedReport?.id) || filteredReports[0] || null;
 
   const goToPrevMonth = () => {
     if (selectedMonth === 0) { setSelectedMonth(11); setSelectedYear(y => y - 1); }
@@ -250,13 +255,25 @@ export const DailyReportsView: React.FC<DailyReportsViewProps> = ({
                             <p className="text-[11px] text-stone-500">{wdr.date}</p>
                           </div>
                         </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                          wdr.status === 'submitted'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {wdr.status === 'submitted' ? 'Soumis' : 'Brouillon'}
-                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {wdr.status === 'draft' && (
+                            <button
+                              onClick={(e) => handleSubmitWorkDayReport(e, wdr)}
+                              disabled={submittingWdrId === wdr.id}
+                              className="flex items-center gap-1 px-2 py-1 rounded-full bg-brand text-white text-[10px] font-semibold hover:bg-brand-dark disabled:opacity-50 transition-colors"
+                            >
+                              {submittingWdrId === wdr.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                              Envoyer
+                            </button>
+                          )}
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            wdr.status === 'submitted'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {wdr.status === 'submitted' ? 'Soumis' : 'Brouillon'}
+                          </span>
+                        </div>
                       </div>
                       {wdr.summary && (
                         <p className="text-xs text-stone-600 line-clamp-2 mb-2">{wdr.summary}</p>
@@ -379,16 +396,26 @@ export const DailyReportsView: React.FC<DailyReportsViewProps> = ({
                     >
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-bold text-xs text-stone-900">{rep.date}</span>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                            rep.status === 'sent'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {rep.status === 'sent' && <CheckCircle2 className="w-2.5 h-2.5" />}
-                          {rep.status === 'sent' ? 'Envoyé' : 'Brouillon'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => handleDeleteReport(e, rep.id)}
+                            disabled={deletingReportId === rep.id}
+                            className="p-1 rounded text-stone-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                            title="Supprimer"
+                          >
+                            {deletingReportId === rep.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                          </button>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                              rep.status === 'sent'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {rep.status === 'sent' && <CheckCircle2 className="w-2.5 h-2.5" />}
+                            {rep.status === 'sent' ? 'Envoyé' : 'Brouillon'}
+                          </span>
+                        </div>
                       </div>
                       <p className="text-[11px] text-stone-500 truncate">Par : {rep.generatedBy}</p>
                       {rep.status === 'sent' && rep.sentAt && (
@@ -551,6 +578,80 @@ export const DailyReportsView: React.FC<DailyReportsViewProps> = ({
                 ))}
               </ul>
             </div>
+
+            {/* Tâches terminées aujourd'hui */}
+            {activeReport.completedToday && activeReport.completedToday.length > 0 && (
+              <div>
+                <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
+                  Tâches Terminées Aujourd'hui
+                </h4>
+                <div className="space-y-2">
+                  {activeReport.completedToday.map((t, i) => (
+                    <div key={i} className="p-3 bg-emerald-50/80 border border-emerald-100 rounded-xl text-xs flex items-center justify-between">
+                      <span className="font-medium text-emerald-900">{t.title}</span>
+                      <span className="text-[10px] text-emerald-700">{t.projectName}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tâches en cours */}
+            {activeReport.inProgressToday && activeReport.inProgressToday.length > 0 && (
+              <div>
+                <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
+                  Tâches en Cours
+                </h4>
+                <div className="space-y-2">
+                  {activeReport.inProgressToday.map((t, i) => (
+                    <div key={i} className="p-3 bg-amber-50/80 border border-amber-100 rounded-xl text-xs space-y-1">
+                      <div className="flex justify-between">
+                        <span className="font-medium text-amber-900">{t.title}</span>
+                        <span className="text-[10px] text-amber-700">{t.projectName}</span>
+                      </div>
+                      <p className="text-[10px] text-amber-800">Assigné : {t.assigneeName}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Présences détaillées */}
+            {activeReport.attendanceDetails && activeReport.attendanceDetails.length > 0 && (
+              <div>
+                <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
+                  Présences du Jour
+                </h4>
+                <div className="space-y-2">
+                  {activeReport.attendanceDetails.map((a, i) => (
+                    <div key={i} className="p-3 bg-stone-50 border border-stone-100 rounded-xl text-xs flex items-center justify-between">
+                      <span className="font-medium text-stone-900">{a.name}</span>
+                      <div className="flex items-center gap-3 text-[10px] text-stone-500">
+                        <span className="capitalize">{a.status.replace('_', ' ')}</span>
+                        <span className="font-semibold text-brand">{Math.floor(a.workMinutes / 60)}h{a.workMinutes % 60}min</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Bilans individuels du jour */}
+            {activeReport.workDaySummaries && activeReport.workDaySummaries.length > 0 && (
+              <div>
+                <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
+                  Bilans Individuels Soumis
+                </h4>
+                <div className="space-y-2">
+                  {activeReport.workDaySummaries.map((s, i) => (
+                    <div key={i} className="p-3 bg-brand-50/40 border border-brand-100 rounded-xl text-xs">
+                      <p className="font-semibold text-brand-dark mb-1">{s.name}</p>
+                      <p className="text-stone-700 line-clamp-3">{s.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Destinataires */}
             <div className="pt-4 border-t border-stone-100">

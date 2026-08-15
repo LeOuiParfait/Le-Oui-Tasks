@@ -76,6 +76,7 @@ export interface Organization {
   workingDays: string[];
   defaultWorkdayDurationHours: number;
   reportEmailRecipients: string[];
+  includeAdminsInReports: boolean;
 }
 
 export interface Team {
@@ -149,6 +150,8 @@ export interface Task {
   blockerReason?: string;
   labels: string[];
   attachments: string[];
+  memberIds?: string[]; // Pour Firestore rules (membres du projet au moment de la tâche)
+  teamIds?: string[];   // Pour Firestore rules (équipes du projet au moment de la tâche)
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -201,7 +204,7 @@ export interface AttendanceRecord {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'task_assigned' | 'review_requested' | 'task_approved' | 'task_rejected' | 'mention' | 'deadline' | 'report_ready';
+  type: 'task_assigned' | 'task_unassigned' | 'task_due_soon' | 'task_overdue' | 'task_completed' | 'task_approved' | 'task_rejected' | 'comment_on_my_task' | 'mentioned_in_comment' | 'review_requested' | 'mention' | 'deadline' | 'report_ready' | 'new_member' | 'project_invitation';
   title: string;
   message: string;
   link?: string;
@@ -251,6 +254,10 @@ export interface DailyReport {
     health: ProjectHealth;
   }[];
   prioritiesTomorrow: string[];
+  completedToday?: { title: string; projectName: string }[];
+  inProgressToday?: { title: string; projectName: string; assigneeName: string }[];
+  attendanceDetails?: { name: string; status: string; workMinutes: number }[];
+  workDaySummaries?: { name: string; summary: string }[];
   sentAt?: string;
   recipients: string[];
   status: 'draft' | 'sent';

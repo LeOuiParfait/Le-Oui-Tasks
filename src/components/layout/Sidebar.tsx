@@ -5,7 +5,6 @@ import {
   FolderKanban,
   FileText,
   Clock,
-  Target,
   BarChart3,
   Plus,
   Users,
@@ -19,7 +18,6 @@ import { User, UserRole } from '../../types';
 import {
   canViewKanbanBoard,
   canViewTeamsView,
-  canViewObjectivesView,
   canViewReportsView,
   canViewAnalyticsView
 } from '../../services/permissions';
@@ -83,7 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Brand Logo + Close (mobile) */}
         <div className="px-5 py-4 flex items-center justify-between border-b border-stone-100">
           <div className="cursor-pointer" onClick={() => handleSelect('kanban')}>
-            <img src="/logo-horizontal.png" alt="Le Oui Parfait" className="h-9 w-auto" />
+            <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className="h-9 w-auto" />
           </div>
           {/* Close button — mobile only */}
           <button
@@ -166,16 +164,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center gap-3">
                   <Users className="w-4 h-4 shrink-0" />
                   <span>Équipes</span>
-                </div>
-              </button>
-            )}
-
-            {/* Objectifs - Tous sauf viewer */}
-            {canViewObjectivesView(currentUser) && (
-              <button onClick={() => handleSelect('objectives')} className={navItemClass(currentView === 'objectives')}>
-                <div className="flex items-center gap-3">
-                  <Target className="w-4 h-4 shrink-0" />
-                  <span>Objectifs</span>
                 </div>
               </button>
             )}

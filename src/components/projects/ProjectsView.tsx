@@ -5,7 +5,7 @@ import {
 import { Project, User, Task, ProjectHealth, Team, ProjectMember } from '../../types';
 import { CreateProjectModal } from './CreateProjectModal';
 import { ProjectMembersModal } from './ProjectMembersModal';
-import { canEditProject, canManageProjectMembers } from '../../services/permissions';
+import { canEditProject, canManageProjectMembers, canViewAllProjects, canViewProject } from '../../services/permissions';
 
 interface ProjectsViewProps {
   projects: Project[];
@@ -65,12 +65,9 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   };
 
   // Filtrer les projets visibles selon les permissions
-  const visibleProjects = projects.filter(p => {
-    // super_admin et admin voient tout
-    if (currentUser.role === 'super_admin' || currentUser.role === 'admin') return true;
-    // Les autres voient uniquement les projets où ils sont membres
-    return p.memberIds.includes(currentUser.id);
-  });
+  const visibleProjects = projects.filter(p =>
+    canViewAllProjects(currentUser) || canViewProject(currentUser, p)
+  );
 
   return (
     <div className="space-y-4 sm:space-y-6 pb-12 max-w-6xl mx-auto">
@@ -113,7 +110,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
             return (
               <div
                 key={project.id}
-                onClick={() => onSelectProject(project.id)}
+                onClick={() => setEditingProject(project)}
                 className="bg-white rounded-xl border border-stone-200 p-5 shadow-sm hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between gap-4"
               >
                 <div>

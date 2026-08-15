@@ -5,7 +5,7 @@ import { User, UserRole, Project, ProjectMember, Team } from '../types';
 const ADMIN_ROLES: UserRole[] = ['super_admin', 'admin'];
 const MANAGEMENT_ROLES: UserRole[] = ['super_admin', 'admin', 'manager', 'team_lead'];
 
-function isAdmin(user: User): boolean {
+export function isAdmin(user: User): boolean {
   return ADMIN_ROLES.includes(user.role);
 }
 
@@ -93,8 +93,13 @@ export function canViewAllProjects(user: User): boolean {
 
 export function canViewProject(user: User, project: Project): boolean {
   if (isAdmin(user)) return true;
-  // Membre du projet
-  return project.memberIds.includes(user.id);
+  // Owner ou membre direct
+  if (project.ownerId === user.id || project.memberIds.includes(user.id)) return true;
+  // Appartenance via une équipe rattachée au projet
+  if (user.teamIds?.length && project.teamIds?.length) {
+    return project.teamIds.some(tid => user.teamIds!.includes(tid));
+  }
+  return false;
 }
 
 export function canEditProject(user: User, project?: Project): boolean {
@@ -125,9 +130,9 @@ export function canViewAllTasks(user: User): boolean {
 
 export function canViewTask(user: User, taskProjectId: string, projects: Project[]): boolean {
   if (isAdmin(user)) return true;
-  // Membre du projet de la tâche
+  // Membre du projet de la tâche (ou via équipe)
   const project = projects.find(p => p.id === taskProjectId);
-  return project ? project.memberIds.includes(user.id) : false;
+  return project ? canViewProject(user, project) : false;
 }
 
 export function canCreateTask(user: User, project?: Project): boolean {

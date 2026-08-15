@@ -9,11 +9,12 @@ import {
   deleteDoc,
   query,
   where,
+  and,
+  or,
   onSnapshot,
   serverTimestamp,
   type Unsubscribe,
-  type DocumentData,
-  type QueryConstraint
+  type DocumentData
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from './firebase';
 import type {
@@ -118,7 +119,7 @@ const USER_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
 
 const ORG_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
   'name', 'industry', 'logo', 'workingHours', 'workingDays', 'timezone',
-  'reportEmailRecipients'
+  'reportEmailRecipients', 'includeAdminsInReports'
   // JAMAIS: createdAt, id
 ]);
 
@@ -139,7 +140,7 @@ const TASK_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
   'title', 'description', 'status', 'priority', 'assigneeId', 'assigneeIds',
   'dueDate', 'tags', 'subtasks', 'weight', 'projectId', 'teamId',
   'completedAt', 'reviewedBy', 'reviewedAt', 'reviewNotes', 'attachments',
-  'estimatedHours', 'actualHours', 'updatedAt'
+  'estimatedHours', 'actualHours', 'memberIds', 'teamIds', 'updatedAt'
   // JAMAIS: organizationId, createdAt
 ]);
 
@@ -159,7 +160,7 @@ const ATTENDANCE_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
 const REPORT_UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
   'date', 'generatedBy', 'attendanceSummary', 'tasksSummary',
   'blockers', 'prioritiesTomorrow', 'recipients', 'teamId',
-  'sentAt', 'sentBy'
+  'sentAt', 'sentBy', 'status'
   // JAMAIS: organizationId, createdAt
 ]);
 
@@ -242,7 +243,8 @@ export function mapOrganization(id: string, data: DocumentData): Organization {
     workingHours: data.workingHours || { start: '09:00', end: '18:00' },
     workingDays: data.workingDays || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
     defaultWorkdayDurationHours: data.defaultWorkdayDurationHours || 8,
-    reportEmailRecipients: data.reportEmailRecipients || []
+    reportEmailRecipients: data.reportEmailRecipients || [],
+    includeAdminsInReports: data.includeAdminsInReports ?? false
   };
 }
 
@@ -368,7 +370,7 @@ export async function fetchProjectsForUser(orgId: string, userId: string, isSupe
   );
 }
 
-export function subscribeProjects(orgId: string, cb: (projects: Project[]) => void): Unsubscribe {
+export function subscribeProjects(orgId: string, _userId: string, _teamIds: string[], _isSuperAdmin: boolean, cb: (projects: Project[]) => void): Unsubscribe {
   if (!isFirebaseConfigured) { cb([]); return () => {}; }
   const q = query(collection(db, COLLECTIONS.projects), where('organizationId', '==', orgId));
   return onSnapshot(q, (snap) => cb(snap.docs.map((d) => mapProject(d.id, d.data()))), (error) => {
@@ -428,6 +430,8 @@ export function mapTask(id: string, data: DocumentData): Task {
     blockerReason: data.blockerReason || undefined,
     labels: data.labels || [],
     attachments: data.attachments || [],
+    memberIds: data.memberIds || [],
+    teamIds: data.teamIds || [],
     createdAt: tsToIso(data.createdAt) || new Date().toISOString(),
     updatedAt: tsToIso(data.updatedAt) || new Date().toISOString(),
     completedAt: tsToIso(data.completedAt),
@@ -444,9 +448,28 @@ export async function fetchTasks(orgId: string): Promise<Task[]> {
   return snap.docs.map((d) => mapTask(d.id, d.data()));
 }
 
-export function subscribeTasks(orgId: string, cb: (tasks: Task[]) => void): Unsubscribe {
+export function subscribeTasks(orgId: string, userId: string, teamIds: string[], isSuperAdmin: boolean, cb: (tasks: Task[]) => void): Unsubscribe {
   if (!isFirebaseConfigured) { cb([]); return () => {}; }
-  const q = query(collection(db, COLLECTIONS.tasks), where('organizationId', '==', orgId));
+  let q;
+  if (isSuperAdmin) {
+    q = query(collection(db, COLLECTIONS.tasks), where('organizationId', '==', orgId));
+  } else {
+    const teamChunks = teamIds.length > 30
+      ? teamIds.slice(0, 30).reduce<string[][]>((acc, id, i) => { const idx = Math.floor(i / 10); if (!acc[idx]) acc[idx] = []; acc[idx].push(id); return acc; }, [])
+      : (teamIds.length > 0 ? [teamIds] : []);
+    const teamFilters = teamChunks.map(ids => where('teamIds', 'array-contains-any', ids));
+    q = query(
+      collection(db, COLLECTIONS.tasks),
+      and(
+        where('organizationId', '==', orgId),
+        or(
+          where('memberIds', 'array-contains', userId),
+          where('assigneeIds', 'array-contains', userId),
+          ...teamFilters
+        )
+      ) as any
+    );
+  }
   return onSnapshot(q, (snap) => cb(snap.docs.map((d) => mapTask(d.id, d.data()))), (error) => {
     console.error(`[Firestore] Error in subscription:`, error);
     cb([]); // Return empty array on error to prevent crashes
@@ -466,11 +489,30 @@ export async function createTask(task: Omit<Task, 'id' | 'organizationId' | 'cre
 
 export async function updateTask(taskId: string, updates: Partial<Task>): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();
+  const { auth } = await import('./firebase');
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Non authentifié.');
+  const idToken = await currentUser.getIdToken();
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
   const safe = pickAllowed(updates as Record<string, any>, TASK_UPDATABLE_FIELDS);
-  await updateDoc(doc(db, COLLECTIONS.tasks, taskId), stripUndefined({
-    ...safe,
-    updatedAt: serverTimestamp()
-  }));
+  const response = await fetch(`${origin}/api/tasks/update`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`
+    },
+    body: JSON.stringify({ taskId, updates: stripUndefined(safe) })
+  });
+
+  const data = await response.json().catch(() => ({ error: 'Erreur serveur.' }));
+  if (!response.ok) {
+    const message = data.error || `Erreur ${response.status} lors de la mise à jour de la tâche.`;
+    console.error('[Tasks] update failed:', response.status, data);
+    if (typeof window !== 'undefined') window.alert('Erreur de sauvegarde tâche : ' + message);
+    throw new Error(message);
+  }
+  console.log('[Tasks] update OK:', taskId);
 }
 
 export async function deleteTask(taskId: string): Promise<void> {
@@ -563,9 +605,11 @@ export async function fetchAttendance(orgId: string): Promise<AttendanceRecord[]
   return snap.docs.map((d) => mapAttendance(d.id, d.data()));
 }
 
-export function subscribeAttendance(orgId: string, cb: (items: AttendanceRecord[]) => void): Unsubscribe {
+export function subscribeAttendance(orgId: string, userId: string, isSuperAdmin: boolean, cb: (items: AttendanceRecord[]) => void): Unsubscribe {
   if (!isFirebaseConfigured) { cb([]); return () => {}; }
-  const q = query(collection(db, COLLECTIONS.attendance), where('organizationId', '==', orgId));
+  const q = isSuperAdmin
+    ? query(collection(db, COLLECTIONS.attendance), where('organizationId', '==', orgId))
+    : query(collection(db, COLLECTIONS.attendance), and(where('organizationId', '==', orgId), where('userId', '==', userId)));
   return onSnapshot(q, (snap) => cb(snap.docs.map((d) => mapAttendance(d.id, d.data()))), (error) => {
     console.error(`[Firestore] Error in subscription:`, error);
     cb([]); // Return empty array on error to prevent crashes
@@ -712,6 +756,14 @@ export async function addCommentDb(comment: Omit<Comment, 'id' | 'createdAt'>): 
   return { id: ref.id, ...comment, createdAt: new Date().toISOString() };
 }
 
+export async function updateCommentDb(commentId: string, updates: Partial<Comment>): Promise<void> {
+  if (!isFirebaseConfigured) notConfigured();
+  await updateDoc(doc(db, COLLECTIONS.comments, commentId), stripUndefined({
+    ...updates,
+    updatedAt: serverTimestamp()
+  }));
+}
+
 // ---------- Reports ----------
 
 export function mapReport(id: string, data: DocumentData): DailyReport {
@@ -726,6 +778,10 @@ export function mapReport(id: string, data: DocumentData): DailyReport {
     blockers: data.blockers || [],
     projectProgress: data.projectProgress || [],
     prioritiesTomorrow: data.prioritiesTomorrow || [],
+    completedToday: data.completedToday || [],
+    inProgressToday: data.inProgressToday || [],
+    attendanceDetails: data.attendanceDetails || [],
+    workDaySummaries: data.workDaySummaries || [],
     sentAt: tsToIso(data.sentAt),
     recipients: data.recipients || [],
     status: data.status || 'draft'
@@ -963,7 +1019,77 @@ export async function deleteAttendance(recordId: string): Promise<void> {
   }
 }
 
+// ---------- Server-side attendance (bypasses client Firestore rules) ----------
+
+async function apiPost(path: string, body: unknown): Promise<void> {
+  const { auth } = await import('./firebase');
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Non authentifié.');
+  const idToken = await currentUser.getIdToken();
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
+  const response = await fetch(`${origin}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`
+    },
+    body: JSON.stringify(body)
+  });
+
+  const data = await response.json().catch(() => ({ error: 'Erreur serveur.' }));
+  if (!response.ok) {
+    const message = data.error || `Erreur ${path}.`;
+    if (typeof window !== 'undefined') window.alert('Erreur serveur : ' + message);
+    throw new Error(message);
+  }
+}
+
+export async function serverStartWorkday(record: AttendanceRecord): Promise<void> {
+  if (!isFirebaseConfigured) notConfigured();
+  await apiPost('/api/attendance/start', { record });
+}
+
+export async function serverEndWorkday(record: AttendanceRecord): Promise<void> {
+  if (!isFirebaseConfigured) notConfigured();
+  await apiPost('/api/attendance/end', { record });
+}
+
+export async function serverToggleBreak(record: AttendanceRecord, presence: 'online' | 'away'): Promise<void> {
+  if (!isFirebaseConfigured) notConfigured();
+  await apiPost('/api/attendance/toggle-break', { record, presence });
+}
+
 // ---------- Generic delete ----------
+
+export async function sendNotificationEmail(toEmail: string, notification: { title: string; message: string; link?: string }): Promise<void> {
+  if (!isFirebaseConfigured) notConfigured();
+  const { auth } = await import('./firebase');
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Non authentifié.');
+  const idToken = await currentUser.getIdToken();
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
+  const response = await fetch(`${origin}/api/notifications/send-email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`
+    },
+    body: JSON.stringify({
+      toEmail,
+      subject: notification.title,
+      title: notification.title,
+      message: notification.message,
+      link: notification.link
+    })
+  });
+
+  const data = await response.json().catch(() => ({ error: 'Erreur serveur.' }));
+  if (!response.ok) {
+    throw new Error(data.error || 'Erreur lors de l\'envoi de l\'e-mail.');
+  }
+}
 
 export async function deleteDocument(collectionName: string, docId: string): Promise<void> {
   if (!isFirebaseConfigured) notConfigured();

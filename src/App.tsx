@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { store } from './services/store';
 import { useAuth } from './services/AuthContext';
 import { AuthScreen } from './components/auth/AuthScreen';
@@ -23,13 +24,13 @@ import { CreateTaskModal } from './components/kanban/CreateTaskModal';
 import { MyWorkView } from './components/mywork/MyWorkView';
 import { AttendanceView } from './components/attendance/AttendanceView';
 import { ProjectsView } from './components/projects/ProjectsView';
-import { ObjectivesView } from './components/objectives/ObjectivesView';
+
 import { DailyReportsView } from './components/reports/DailyReportsView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { TeamsView } from './components/teams/TeamsView';
 import { SettingsModal } from './components/settings/SettingsModal';
-import { Loader2 } from 'lucide-react';
-import { canViewAllTasks } from './services/permissions';
+import { Loader2, X } from 'lucide-react';
+import { canViewAllTasks, canViewTask } from './services/permissions';
 import { usePresenceTracking } from './services/usePresenceTracking';
 
 export default function App() {
@@ -65,12 +66,19 @@ export default function App() {
 }
 
 function Workspace() {
-  const { currentUser, organization, signOut, updateCurrentUser } = useAuth();
+  const { currentUser: authUser, organization, signOut, updateCurrentUser } = useAuth();
 
-  // Ensure store has the current user
+  // Keep Workspace currentUser in sync with store (which follows Firestore users)
+  const [currentUser, setStoreCurrentUser] = useState<User | null>(store.getCurrentUser());
   useEffect(() => {
-    if (currentUser) store.setCurrentUser(currentUser);
-  }, [currentUser]);
+    if (authUser) store.setCurrentUser(authUser);
+  }, [authUser]);
+  useEffect(() => {
+    const refresh = () => setStoreCurrentUser(store.getCurrentUser());
+    refresh();
+    const unsub = store.subscribe(refresh);
+    return unsub;
+  }, []);
 
   // Sync store profile changes back to AuthContext
   useEffect(() => {
@@ -92,8 +100,43 @@ function Workspace() {
   const isCurrentlyWorking = myTodayRecord?.status === 'working' || myTodayRecord?.status === 'on_break';
   usePresenceTracking(currentUser?.id, isCurrentlyWorking);
 
-  const [currentView, setCurrentView] = useState<string>('kanban');
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pathToView: Record<string, string> = {
+    '/': 'kanban',
+    '/kanban': 'kanban',
+    '/mywork': 'mywork',
+    '/attendance': 'attendance',
+    '/projects': 'projects',
+    '/teams': 'teams',
+    '/reports': 'reports',
+    '/analytics': 'analytics',
+    '/notifications': 'notifications'
+  };
+  const viewToPath: Record<string, string> = {
+    'kanban': '/',
+    'mywork': '/mywork',
+    'attendance': '/attendance',
+    'projects': '/projects',
+    'teams': '/teams',
+    'reports': '/reports',
+    'analytics': '/analytics',
+    'notifications': '/notifications'
+  };
+  const [currentView, setCurrentView] = useState<string>(pathToView[location.pathname] || 'kanban');
+
+  useEffect(() => {
+    const view = pathToView[location.pathname] || 'kanban';
+    if (view !== currentView) setCurrentView(view);
+  }, [location.pathname]);
+
+  const handleSetView = (view: string) => {
+    setCurrentView(view);
+    const path = viewToPath[view] || '/';
+    if (location.pathname !== path) navigate(path);
+  };
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const selectedTask = useMemo(() => tasks.find((t) => t.id === selectedTaskId) || null, [tasks, selectedTaskId]);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
   const [initialTaskStatus, setInitialTaskStatus] = useState<TaskStatus>('Todo');
   const [showSettings, setShowSettings] = useState(false);
@@ -122,7 +165,6 @@ function Workspace() {
     projects: 'Vue d\'ensemble des Projets',
     attendance: 'Présences & Pointage',
     teams: 'Équipes',
-    objectives: 'OKR & Objectifs',
     reports: 'Rapports Quotidiens',
     analytics: 'Analytique de Gestion'
   };
@@ -130,9 +172,9 @@ function Workspace() {
   // Filtrer les tâches selon les permissions
   const visibleTasks = useMemo(() => {
     if (canViewAllTasks(currentUser)) return tasks;
-    // User simple : uniquement ses tâches assignées
-    return tasks.filter(t => t.assigneeIds.includes(currentUser.id));
-  }, [tasks, currentUser]);
+    // User : toutes les tâches des projets dont il est membre + celles qui lui sont assignées
+    return tasks.filter(t => canViewTask(currentUser, t.projectId, projects) || t.assigneeIds.includes(currentUser.id));
+  }, [tasks, currentUser, projects]);
 
   const completedTasksCount = visibleTasks.filter((t) => t.status === 'Completed').length;
   const activeTeamMembersCount = users.filter((u) => u.presenceStatus === 'online' || u.presenceStatus === 'away').length;
@@ -152,10 +194,10 @@ function Workspace() {
       {/* Sidebar Navigation */}
       <Sidebar
         currentView={currentView}
-        onSelectView={setCurrentView}
+        onSelectView={handleSetView}
         currentUser={currentUser}
         unreadNotificationsCount={notifications.filter((n) => !n.read).length}
-        onOpenCreateProject={() => setCurrentView('projects')}
+        onOpenCreateProject={() => handleSetView('projects')}
         onOpenUserSwitch={() => setShowSettings(true)}
         onSignOut={signOut}
         tasksCount={visibleTasks.length}
@@ -195,7 +237,7 @@ function Workspace() {
               users={users}
               projects={projects}
               onUpdateTaskStatus={(taskId, status) => store.updateTaskStatus(taskId, status)}
-              onOpenTaskDetail={setSelectedTask}
+              onOpenTaskDetail={(t) => setSelectedTaskId(t.id)}
               onOpenCreateTask={(initialStatus) => {
                 setInitialTaskStatus(initialStatus || 'Todo');
                 setShowCreateTaskModal(true);
@@ -208,7 +250,7 @@ function Workspace() {
               tasks={visibleTasks}
               objectives={objectives}
               attendanceRecord={myTodayAttendance}
-              onOpenTaskDetail={setSelectedTask}
+              onOpenTaskDetail={(t) => setSelectedTaskId(t.id)}
               onUpdateTaskStatus={(taskId, status) => store.updateTaskStatus(taskId, status)}
               onStartWorkday={() => store.startWorkday()}
             />
@@ -230,8 +272,8 @@ function Workspace() {
               tasks={tasks}
               teams={teams}
               currentUser={currentUser}
-              onOpenCreateProject={() => setCurrentView('projects')}
-              onSelectProject={(pId) => setCurrentView('kanban')}
+              onOpenCreateProject={() => handleSetView('projects')}
+              onSelectProject={(pId) => handleSetView('kanban')}
               onCreateProject={(data) => store.createProject(data)}
               onUpdateProject={(projectId, updates) => store.updateProject(projectId, updates)}
               onDeleteProject={(projectId) => store.deleteProject(projectId)}
@@ -246,14 +288,6 @@ function Workspace() {
               onDeleteTeam={(teamId) => store.deleteTeam(teamId)}
               onAddMember={(teamId, userId) => store.addTeamMember(teamId, userId)}
               onRemoveMember={(teamId, userId) => store.removeTeamMember(teamId, userId)}
-            />
-          ) : currentView === 'objectives' ? (
-            <ObjectivesView
-              objectives={objectives}
-              users={users}
-              projects={projects}
-              onUpdateProgress={(objId, val) => store.updateObjectiveProgress(objId, val)}
-              onCreateObjective={(data) => store.createObjective(data)}
             />
           ) : currentView === 'reports' ? (
             <DailyReportsView
@@ -292,18 +326,31 @@ function Workspace() {
                   notifications.map((n) => (
                     <div
                       key={n.id}
-                      onClick={() => store.markNotificationRead(n.id)}
-                      className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+                      className={`p-4 rounded-lg border transition-colors group ${
                         n.read ? 'bg-white border-stone-100' : 'bg-brand-50 border-brand font-semibold'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-bold text-brand">{n.title}</span>
-                        <span className="text-[10px] text-stone-400">
-                          {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                      <div className="flex items-start justify-between mb-1 gap-2">
+                        <div
+                          onClick={() => store.markNotificationRead(n.id)}
+                          className="flex-1 cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-bold text-brand">{n.title}</span>
+                            <span className="text-[10px] text-stone-400">
+                              {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-xs text-stone-600 font-normal">{n.message}</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); store.deleteNotification(n.id); }}
+                          className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                          title="Supprimer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
-                      <p className="text-xs text-stone-600 font-normal">{n.message}</p>
                     </div>
                   ))
                 )}
@@ -321,14 +368,19 @@ function Workspace() {
           projects={projects}
           currentUser={currentUser}
           comments={store.getTaskComments(selectedTask.id)}
-          onClose={() => setSelectedTask(null)}
+          onClose={() => setSelectedTaskId(null)}
+          onUpdateTask={(taskId, updates) => store.updateTask(taskId, updates)}
           onUpdateStatus={(taskId, status, blockerReason) => store.updateTaskStatus(taskId, status, blockerReason)}
           onSubmitForReview={(taskId) => store.submitTaskForReview(taskId)}
           onApproveTask={(taskId, comment) => store.approveTask(taskId, comment)}
           onRejectTask={(taskId, feedback) => store.rejectTask(taskId, feedback)}
           onToggleSubtask={(taskId, subId) => store.toggleSubtask(taskId, subId)}
           onAddSubtask={(taskId, title) => store.addSubtask(taskId, title)}
+          onEditSubtask={(taskId, subId, title) => store.editSubtask(taskId, subId, title)}
+          onDeleteSubtask={(taskId, subId) => store.deleteSubtask(taskId, subId)}
           onAddComment={(taskId, content) => store.addComment(taskId, content)}
+          onEditComment={(commentId, taskId, content) => store.editComment(commentId, taskId, content)}
+          onDeleteComment={(commentId, taskId) => store.deleteComment(commentId, taskId)}
           onDeleteTask={(taskId) => store.deleteTask(taskId)}
         />
       )}

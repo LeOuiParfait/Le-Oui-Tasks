@@ -43,6 +43,26 @@ const MONTH_NAMES = [
   'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
 ];
 
+function getEffectiveBreakMinutes(r: AttendanceRecord): number {
+  let breakMins = r.totalBreakMinutes || 0;
+  if (r.status === 'on_break' && r.breakStartTime) {
+    breakMins += (Date.now() - new Date(r.breakStartTime).getTime()) / 60000;
+  }
+  return Math.round(breakMins);
+}
+
+function getEffectiveWorkMinutes(r: AttendanceRecord): number {
+  if (r.status === 'completed') return r.totalWorkMinutes || 0;
+  if (!r.startTime) return r.totalWorkMinutes || 0;
+  const [sh, sm] = r.startTime.split(':').map(Number);
+  const start = new Date();
+  start.setHours(sh, sm, 0, 0);
+  let elapsed = (Date.now() - start.getTime()) / 60000;
+  if (elapsed < 0) elapsed += 24 * 60;
+  const breakMins = getEffectiveBreakMinutes(r);
+  return Math.max(0, Math.round(elapsed - breakMins));
+}
+
 export const AttendanceView: React.FC<AttendanceViewProps> = ({
   currentUser,
   users,
@@ -99,7 +119,11 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-  const [selectedUserFilter, setSelectedUserFilter] = useState<string>('all');
+  const [selectedUserFilter, setSelectedUserFilter] = useState<string>(canSeeAll ? 'all' : currentUser.id);
+
+  useEffect(() => {
+    setSelectedUserFilter(canSeeAll ? 'all' : currentUser.id);
+  }, [canSeeAll, currentUser.id]);
 
   const filteredByMonth = useMemo(() => {
     return visibleAttendanceRecords.filter(r => {
@@ -117,8 +141,9 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   const monthlyStats = useMemo(() => {
     const records = filteredByMonth;
     const totalDays = records.length;
-    const totalWorkMinutes = records.reduce((sum, r) => sum + (r.totalWorkMinutes || 0), 0);
-    const totalBreakMinutes = records.reduce((sum, r) => sum + (r.totalBreakMinutes || 0), 0);
+
+    const totalWorkMinutes = records.reduce((sum, r) => sum + getEffectiveWorkMinutes(r), 0);
+    const totalBreakMinutes = records.reduce((sum, r) => sum + getEffectiveBreakMinutes(r), 0);
     const completedDays = records.filter(r => r.status === 'completed').length;
     const avgWorkPerDay = totalDays > 0 ? Math.round(totalWorkMinutes / totalDays) : 0;
 
@@ -127,8 +152,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     records.forEach(r => {
       if (!byUser[r.userId]) byUser[r.userId] = { days: 0, workMinutes: 0, breakMinutes: 0 };
       byUser[r.userId].days += 1;
-      byUser[r.userId].workMinutes += r.totalWorkMinutes || 0;
-      byUser[r.userId].breakMinutes += r.totalBreakMinutes || 0;
+      byUser[r.userId].workMinutes += getEffectiveWorkMinutes(r);
+      byUser[r.userId].breakMinutes += getEffectiveBreakMinutes(r);
     });
 
     return {
@@ -179,8 +204,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     const rows = records.map(rec => {
       const u = visibleUsers.find(usr => usr.id === rec.userId);
       const name = u ? `${u.firstName} ${u.lastName}` : 'Inconnu';
-      const workTime = formatDurationLong(rec.totalWorkMinutes || 0);
-      const breakTime = formatDurationLong(rec.totalBreakMinutes || 0);
+      const workTime = formatDurationLong(getEffectiveWorkMinutes(rec));
+      const breakTime = formatDurationLong(getEffectiveBreakMinutes(rec));
       const statusLabel = rec.status === 'working' ? 'En cours' : rec.status === 'on_break' ? 'En pause' : rec.status === 'completed' ? 'Terminé' : rec.status;
       // Échapper les guillemets pour CSV
       const summary = (rec.summary || '').replace(/"/g, '""');
@@ -267,7 +292,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                 </h2>
                 <p className="text-xs text-stone-500 mt-0.5 truncate">
                   {isWorking && myTodayRecord ? `Débuté à ${myTodayRecord.startTime}`
-                  : isOnBreak && myTodayRecord ? `En pause depuis ${myTodayRecord.startTime}`
+                  : isOnBreak && myTodayRecord ? `En pause depuis ${myTodayRecord.breakStartTime ? new Date(myTodayRecord.breakStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : myTodayRecord.startTime}`
                   : isCompleted && myTodayRecord ? `${myTodayRecord.startTime} → ${myTodayRecord.endTime}`
                   : 'Pointez votre début de journée pour signaler votre disponibilité'}
                 </p>
@@ -465,14 +490,6 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
         {/* Grille des membres */}
         <div className="p-3 sm:p-4">
-          {!canSeeAll && (
-            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
-              <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-blue-800">
-                Vous voyez uniquement votre propre présence. Contactez votre administrateur pour plus d'accès.
-              </p>
-            </div>
-          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-3">
             {visibleUsers.map((user) => {
               const isSelf = user.id === currentUser.id;
@@ -694,7 +711,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                         </td>
                         <td className="px-4 py-3 text-stone-700 font-medium">{rec.startTime}</td>
                         <td className="px-4 py-3 text-stone-700 font-medium">{rec.endTime || '—'}</td>
-                        <td className="px-4 py-3 text-stone-900 font-semibold">{formatDuration(rec.totalWorkMinutes)}</td>
+                        <td className="px-4 py-3 text-stone-900 font-semibold">{formatDuration(getEffectiveWorkMinutes(rec))}</td>
                         <td className="px-4 py-3">
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${badge.bg} ${badge.text} ${badge.border}`}>
                             {badge.label}

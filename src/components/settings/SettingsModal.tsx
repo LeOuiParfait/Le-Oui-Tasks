@@ -38,11 +38,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'org' | 'users' | 'reports' | 'roles'>('profile');
   const canManageUsers = currentUser.role === 'super_admin' || currentUser.role === 'admin';
+  const isSuperAdmin = currentUser.role === 'super_admin';
 
   return (
     <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl max-w-2xl w-full shadow-xl overflow-hidden my-8 flex flex-col max-h-[90vh]">
-        <div className="px-4 sm:px-6 py-4 border-b border-stone-100 flex items-center justify-between bg-stone-50/50">
+      <div className="bg-white rounded-xl max-w-4xl w-full shadow-xl overflow-hidden my-8 flex flex-col max-h-[90vh]">
+        <div className="px-4 sm:px-6 py-4 border-b border-stone-100 flex items-center justify-between bg-stone-50/50 shrink-0">
           <div className="flex items-center gap-2">
             <Settings className="w-5 h-5 text-brand" />
             <h2 className="font-brand text-lg font-medium text-stone-900">Paramètres</h2>
@@ -52,27 +53,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        <div className="flex border-b border-stone-100 px-6 bg-stone-50/30 overflow-x-auto">
-          <button onClick={() => setActiveTab('profile')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'profile' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+        <div className="flex border-b border-stone-100 px-6 bg-stone-50/30 overflow-x-auto shrink-0">
+          <button onClick={() => setActiveTab('profile')} className={`px-5 py-3.5 font-semibold text-sm border-b-2 transition-colors whitespace-nowrap ${activeTab === 'profile' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
             Mon Profil
           </button>
           {canManageUsers && (
             <>
-              <button onClick={() => setActiveTab('users')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'users' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+              <button onClick={() => setActiveTab('users')} className={`px-5 py-3.5 font-semibold text-sm border-b-2 transition-colors whitespace-nowrap ${activeTab === 'users' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
                 Membres & Invitations
               </button>
-              <button onClick={() => setActiveTab('roles')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'roles' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+              <button onClick={() => setActiveTab('roles')} className={`px-5 py-3.5 font-semibold text-sm border-b-2 transition-colors whitespace-nowrap ${activeTab === 'roles' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
                 <Shield className="w-3.5 h-3.5 inline mr-1.5" />
                 Guide des Rôles
               </button>
             </>
           )}
-          <button onClick={() => setActiveTab('org')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'org' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
-            Entreprise
-          </button>
-          <button onClick={() => setActiveTab('reports')} className={`px-4 py-3 font-semibold text-xs border-b-2 transition-colors whitespace-nowrap ${activeTab === 'reports' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
-            Rapports
-          </button>
+          {isSuperAdmin && (
+            <>
+              <button onClick={() => setActiveTab('org')} className={`px-5 py-3.5 font-semibold text-sm border-b-2 transition-colors whitespace-nowrap ${activeTab === 'org' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+                Entreprise
+              </button>
+              <button onClick={() => setActiveTab('reports')} className={`px-5 py-3.5 font-semibold text-sm border-b-2 transition-colors whitespace-nowrap ${activeTab === 'reports' ? 'border-brand text-brand' : 'border-transparent text-stone-500 hover:text-stone-900'}`}>
+                Rapports
+              </button>
+            </>
+          )}
         </div>
 
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 no-scrollbar text-xs">
@@ -82,10 +87,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <UsersTab organization={organization} users={users} currentUser={currentUser} />
           ) : activeTab === 'roles' && canManageUsers ? (
             <RolesGuide />
-          ) : activeTab === 'org' ? (
+          ) : activeTab === 'org' && isSuperAdmin ? (
             <OrgTab organization={organization} />
-          ) : (
+          ) : activeTab === 'reports' && isSuperAdmin ? (
             <ReportsTab organization={organization} />
+          ) : (
+            <ProfileTab currentUser={currentUser} />
           )}
         </div>
       </div>
@@ -373,8 +380,12 @@ const UsersTab: React.FC<{ organization: Organization; users: User[]; currentUse
       setInviteError('Veuillez remplir tous les champs obligatoires.');
       return;
     }
-    if (password.length < 6) {
-      setInviteError('Le mot de passe doit contenir au moins 6 caractères.');
+    if (password.length < 8) {
+      setInviteError('Le mot de passe doit contenir au moins 8 caractères.');
+      return;
+    }
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
+      setInviteError('Le mot de passe doit contenir au moins une majuscule, une minuscule et un chiffre.');
       return;
     }
 
@@ -855,6 +866,7 @@ const OrgTab: React.FC<{ organization: Organization }> = ({ organization }) => {
 
 const ReportsTab: React.FC<{ organization: Organization }> = ({ organization }) => {
   const [recipients, setRecipients] = useState(organization.reportEmailRecipients.join('\n'));
+  const [includeAdmins, setIncludeAdmins] = useState(organization.includeAdminsInReports ?? false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -875,7 +887,7 @@ const ReportsTab: React.FC<{ organization: Organization }> = ({ organization }) 
 
     setSaving(true);
     try {
-      await store.updateOrganization({ reportEmailRecipients: emails });
+      await store.updateOrganization({ reportEmailRecipients: emails, includeAdminsInReports: includeAdmins });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err: any) {
@@ -899,6 +911,20 @@ const ReportsTab: React.FC<{ organization: Organization }> = ({ organization }) 
         <p className="text-[11px] text-stone-400 mt-1">
           Un e-mail par ligne. Les rapports seront envoyés à ces adresses.
         </p>
+      </div>
+
+      <div className="flex items-start gap-3 p-3 rounded-lg bg-stone-50 border border-stone-200">
+        <input
+          id="include-admins"
+          type="checkbox"
+          checked={includeAdmins}
+          onChange={(e) => setIncludeAdmins(e.target.checked)}
+          className="mt-0.5 w-4 h-4 text-brand border-stone-300 rounded focus:ring-brand"
+        />
+        <label htmlFor="include-admins" className="text-xs text-stone-700">
+          <span className="font-semibold">Inclure automatiquement les e-mails des admins</span>
+          <span className="block text-stone-500">Les rapports seront également envoyés à tous les utilisateurs avec le rôle admin ou super admin.</span>
+        </label>
       </div>
 
       {error && (

@@ -48,6 +48,27 @@ export const WorkDayReportModal: React.FC<WorkDayReportModalProps> = ({
     );
   };
 
+  const getEffectiveBreakMinutes = (r: AttendanceRecord | undefined) => {
+    if (!r) return 0;
+    let breakMins = r.totalBreakMinutes || 0;
+    if (r.status === 'on_break' && r.breakStartTime) {
+      breakMins += (Date.now() - new Date(r.breakStartTime).getTime()) / 60000;
+    }
+    return Math.round(breakMins);
+  };
+
+  const getEffectiveWorkMinutes = (r: AttendanceRecord | undefined) => {
+    if (!r) return 0;
+    if (r.status === 'completed') return r.totalWorkMinutes || 0;
+    if (!r.startTime) return r.totalWorkMinutes || 0;
+    const [sh, sm] = r.startTime.split(':').map(Number);
+    const start = new Date();
+    start.setHours(sh, sm, 0, 0);
+    let elapsed = (Date.now() - start.getTime()) / 60000;
+    if (elapsed < 0) elapsed += 24 * 60;
+    return Math.max(0, Math.round(elapsed - getEffectiveBreakMinutes(r)));
+  };
+
   const formatDuration = (minutes: number) => {
     const h = Math.floor(minutes / 60);
     const m = minutes % 60;
@@ -80,8 +101,8 @@ export const WorkDayReportModal: React.FC<WorkDayReportModalProps> = ({
         achievements: achievements.trim(),
         challenges: challenges.trim(),
         planTomorrow: planTomorrow.trim(),
-        workMinutes: attendanceRecord?.totalWorkMinutes || 0,
-        breakMinutes: attendanceRecord?.totalBreakMinutes || 0,
+        workMinutes: getEffectiveWorkMinutes(attendanceRecord),
+        breakMinutes: getEffectiveBreakMinutes(attendanceRecord),
         startTime: attendanceRecord?.startTime,
         endTime: attendanceRecord?.endTime
       };
@@ -137,7 +158,7 @@ export const WorkDayReportModal: React.FC<WorkDayReportModalProps> = ({
                 </div>
                 <div>
                   <p className="text-[10px] text-stone-500 uppercase tracking-wider font-semibold">Travail</p>
-                  <p className="text-sm font-semibold text-brand">{formatDuration(attendanceRecord.totalWorkMinutes || 0)}</p>
+                  <p className="text-sm font-semibold text-brand">{formatDuration(getEffectiveWorkMinutes(attendanceRecord))}</p>
                 </div>
               </div>
             </div>

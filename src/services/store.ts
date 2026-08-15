@@ -45,7 +45,8 @@ import {
   canCreateObjective,
   canDeleteObjective,
   canGenerateOrgReport,
-  canChangeRoles
+  canChangeRoles,
+  isAdmin
 } from './permissions';
 
 const STORAGE_PREFIX = 'tasking_app_v1_';
@@ -64,6 +65,7 @@ class AppStore {
   private teams: Team[] = [];
   private projects: Project[] = [];
   private tasks: Task[] = [];
+  private allTasks: Task[] = [];
   private objectives: Objective[] = [];
   private attendanceRecords: AttendanceRecord[] = [];
   private notifications: Notification[] = [];
@@ -129,6 +131,21 @@ class AppStore {
     }
   }
 
+  // ---------- Helpers ----------
+
+  private refreshTasks() {
+    const currentUser = this.getCurrentUser();
+    const isSuperAdmin = currentUser?.role === 'super_admin';
+    if (isSuperAdmin) {
+      this.tasks = this.allTasks;
+    } else {
+      const projectIds = this.projects.map(p => p.id);
+      this.tasks = this.allTasks.filter(t => projectIds.includes(t.projectId));
+    }
+    const projectIds = new Set(this.tasks.map(t => t.projectId));
+    projectIds.forEach(pid => this.recalculateProjectProgress(pid));
+  }
+
   // ---------- Firestore initialization ----------
 
   /** Initialize the store with Firestore subscriptions for the given organization. */
@@ -143,35 +160,29 @@ class AppStore {
 
     const isSuperAdmin = currentUser.role === 'super_admin';
 
-    this.subs.push(db.subscribeUsers(orgId, (items) => { this.users = items; this.notifyListeners(); }));
+    this.subs.push(db.subscribeUsers(orgId, (items) => {
+      this.users = items;
+      const me = items.find((u) => u.id === this.currentUser?.id);
+      if (me) this.currentUser = me;
+      this.notifyListeners();
+    }));
     this.subs.push(db.subscribeTeams(orgId, (items) => { this.teams = items; this.notifyListeners(); }));
     
     // Projects: filter by user membership unless super_admin
-    this.subs.push(db.subscribeProjects(orgId, (items) => {
-      if (isSuperAdmin) {
-        this.projects = items;
-      } else {
-        this.projects = items.filter(p => 
-          p.ownerId === currentUser.id || 
-          p.members.some(m => m.userId === currentUser.id)
-        );
-      }
+    this.subs.push(db.subscribeProjects(orgId, currentUser.id, currentUser.teamIds || [], isSuperAdmin, (items) => {
+      this.projects = items;
+      this.refreshTasks();
       this.notifyListeners();
     }));
     
     // Tasks: filter by project membership
-    this.subs.push(db.subscribeTasks(orgId, (items) => {
-      if (isSuperAdmin) {
-        this.tasks = items;
-      } else {
-        const projectIds = this.projects.map(p => p.id);
-        this.tasks = items.filter(t => projectIds.includes(t.projectId));
-      }
-      this.notifyListeners();
+    this.subs.push(db.subscribeTasks(orgId, currentUser.id, currentUser.teamIds || [], isSuperAdmin, (items) => {
+      this.allTasks = items;
+      this.refreshTasks();
     }));
     
     this.subs.push(db.subscribeObjectives(orgId, (items) => { this.objectives = items; this.notifyListeners(); }));
-    this.subs.push(db.subscribeAttendance(orgId, (items) => { this.attendanceRecords = items; this.notifyListeners(); }));
+    this.subs.push(db.subscribeAttendance(orgId, currentUser.id, isSuperAdmin, (items) => { this.attendanceRecords = items; this.notifyListeners(); }));
     this.subs.push(db.subscribeNotifications(currentUser.id, (items) => { this.notifications = items; this.notifyListeners(); }));
     this.subs.push(db.subscribeReports(orgId, (items) => { this.reports = items; this.notifyListeners(); }));
     this.subs.push(db.subscribeWorkDayReports(orgId, (items) => { this.workDayReports = items; this.notifyListeners(); }));
@@ -504,7 +515,15 @@ class AppStore {
     };
 
     if (isFirebaseConfigured) {
-      try { await db.createNotification(notif); } catch (e) { console.error('[Notif] Erreur Firestore:', e); }
+      try {
+        await db.createNotification(notif);
+        const targetUser = this.users.find((u) => u.id === userId);
+        if (targetUser?.email) {
+          db.sendNotificationEmail(targetUser.email, { title, message, link }).catch((e) => {
+            console.warn('[Notif] E-mail non envoyé:', e);
+          });
+        }
+      } catch (e) { console.error('[Notif] Erreur Firestore:', e); }
     } else {
       const entry: Notification = {
         ...notif,
@@ -560,14 +579,13 @@ class AppStore {
       if (summary) record.summary = summary;
     }
 
+    this.attendanceRecords = [record, ...this.attendanceRecords.filter((r) => r.id !== record!.id)];
+    this.currentUser = { ...this.currentUser, presenceStatus: 'online' } as User;
+    this.users = this.users.map((u) => u.id === user.id ? { ...u, presenceStatus: 'online' } : u);
+    if (this.onProfileUpdate) this.onProfileUpdate({ presenceStatus: 'online' });
+
     if (isFirebaseConfigured) {
-      await db.upsertAttendance(record);
-      await db.updateUserPresence(user.id, 'online');
-    } else {
-      this.attendanceRecords = [record, ...this.attendanceRecords.filter((r) => r.id !== record!.id)];
-      this.currentUser!.presenceStatus = 'online';
-      const uIdx = this.users.findIndex((u) => u.id === user.id);
-      if (uIdx !== -1) this.users[uIdx].presenceStatus = 'online';
+      await db.serverStartWorkday(record);
     }
 
     await this.logAudit('Démarrage Journée', 'attendance', record.id, 'Pointage Entrée', `Pointé à ${nowHHMM}`);
@@ -580,11 +598,12 @@ class AppStore {
     const record = this.attendanceRecords.find((r) => r.userId === user.id && r.date === today);
     if (!record) return;
 
+    const presence: 'online' | 'away' = record.status === 'working' ? 'away' : 'online';
+
     if (record.status === 'working') {
       record.status = 'on_break';
       record.breakStartTime = new Date().toISOString();
-      if (isFirebaseConfigured) await db.updateUserPresence(user.id, 'away');
-      else this.currentUser!.presenceStatus = 'away';
+      if (!isFirebaseConfigured) this.currentUser!.presenceStatus = 'away';
       await this.logAudit('Début Pause', 'attendance', record.id, 'Pause');
     } else if (record.status === 'on_break') {
       record.status = 'working';
@@ -593,18 +612,19 @@ class AppStore {
         record.totalBreakMinutes += Math.max(1, breakMins);
         record.breakStartTime = undefined;
       }
-      if (isFirebaseConfigured) await db.updateUserPresence(user.id, 'online');
-      else this.currentUser!.presenceStatus = 'online';
+      if (!isFirebaseConfigured) this.currentUser!.presenceStatus = 'online';
       await this.logAudit('Fin Pause', 'attendance', record.id, 'Reprise');
     }
 
-    if (isFirebaseConfigured) {
-      await db.upsertAttendance(record);
-    } else {
-      const uIdx = this.users.findIndex((u) => u.id === user.id);
-      if (uIdx !== -1) this.users[uIdx].presenceStatus = this.currentUser!.presenceStatus;
-    }
+    this.attendanceRecords = this.attendanceRecords.map((r) => r.id === record!.id ? record! : r);
+    this.currentUser = { ...this.currentUser, presenceStatus: presence } as User;
+    this.users = this.users.map((u) => u.id === user.id ? { ...u, presenceStatus: presence } : u);
+    if (this.onProfileUpdate) this.onProfileUpdate({ presenceStatus: presence });
     this.notify();
+
+    if (isFirebaseConfigured) {
+      await db.serverToggleBreak(record!, presence);
+    }
   }
 
   async endWorkday(summary?: string) {
@@ -650,17 +670,17 @@ class AppStore {
       record.lastHeartbeatAt = user.lastActiveAt;
     }
 
+    this.attendanceRecords = this.attendanceRecords.map((r) => r.id === record?.id ? record! : r);
+    this.currentUser = { ...this.currentUser, presenceStatus: 'offline' } as User;
+    this.users = this.users.map((u) => u.id === user.id ? { ...u, presenceStatus: 'offline' } : u);
+    if (this.onProfileUpdate) this.onProfileUpdate({ presenceStatus: 'offline' });
+    this.notify();
+
     if (isFirebaseConfigured) {
-      if (record) await db.upsertAttendance(record);
-      await db.updateUserPresence(user.id, 'offline');
-    } else {
-      this.currentUser!.presenceStatus = 'offline';
-      const uIdx = this.users.findIndex((u) => u.id === user.id);
-      if (uIdx !== -1) this.users[uIdx].presenceStatus = 'offline';
+      if (record) await db.serverEndWorkday(record);
     }
 
     await this.logAudit('Fin Journée', 'attendance', record?.id || 'att-end', 'Pointage Sortie', `Pointé à ${nowHHMM}${record?.timeEstimated ? ' (temps estimé)' : ''}`);
-    this.notify();
   }
 
   // ---------- Task Operations ----------
@@ -673,9 +693,17 @@ class AppStore {
       throw new Error('Vous n\'avez pas l\'autorisation de créer une tâche dans ce projet.');
     }
     const orgId = this.getOrganization().id;
+    const taskWithMeta = {
+      ...taskData,
+      memberIds: taskData.memberIds?.length ? taskData.memberIds : (proj?.memberIds || []),
+      teamIds: taskData.teamIds?.length ? taskData.teamIds : (proj?.teamIds || [])
+    };
 
     if (isFirebaseConfigured) {
-      const newTask = await db.createTask(taskData, orgId);
+      const newTask = await db.createTask(taskWithMeta, orgId);
+      // onSnapshot mettra à jour this.tasks avec la source de vérité Firestore
+      this.recalculateProjectProgress(newTask.projectId);
+      this.notify();
       await this.notifyAssignees(newTask, 'task_assigned', 'Assignation de Tâche', `${this.getCurrentUser().firstName} vous a assigné la tâche « ${newTask.title} ».`, `/tasks/${newTask.id}`);
       await this.logAudit('Tâche Créée', 'task', newTask.id, newTask.title, `Statut: ${newTask.status}, Priorité: ${newTask.priority}`);
       return newTask;
@@ -683,7 +711,7 @@ class AppStore {
 
     // Local mode
     const newTask: Task = {
-      ...taskData,
+      ...taskWithMeta,
       id: `task-${Date.now()}`,
       organizationId: orgId,
       createdAt: new Date().toISOString(),
@@ -713,18 +741,27 @@ class AppStore {
     if (!canEditTask(user, task?.assigneeIds || [], proj)) {
       throw new Error('Vous n\'avez pas l\'autorisation de modifier cette tâche.');
     }
+    const newProject = updates.projectId ? this.projects.find((p) => p.id === updates.projectId) : undefined;
+    const metaUpdates = newProject ? { memberIds: newProject.memberIds, teamIds: newProject.teamIds } : {};
+    this.tasks = this.tasks.map((t) => t.id === taskId ? { ...t, ...updates, ...metaUpdates, updatedAt: new Date().toISOString() } : t);
+    const updatedTask = this.tasks.find((t) => t.id === taskId);
+    if (updatedTask) this.recalculateProjectProgress(updatedTask.projectId);
+    this.notify();
+
+    const previousAssignees = task?.assigneeIds || [];
+    const newAssignees = (updates.assigneeIds || []).filter((uid) => !previousAssignees.includes(uid));
+
+    for (const uid of newAssignees) {
+      if (uid !== this.getCurrentUser().id) {
+        await this.notifyUser(uid, 'task_assigned', 'Assignation de Tâche', `${this.getCurrentUser().firstName} vous a assigné la tâche « ${updatedTask?.title || taskId} ».`, `/tasks/${taskId}`);
+      }
+    }
+
     if (isFirebaseConfigured) {
       await db.updateTask(taskId, updates);
-      const task = this.tasks.find((t) => t.id === taskId);
-      if (task) await this.logAudit('Tâche Modifiée', 'task', taskId, task.title, 'Champs mis à jour');
-      return;
     }
-    const idx = this.tasks.findIndex((t) => t.id === taskId);
-    if (idx === -1) return;
-    this.tasks[idx] = { ...this.tasks[idx], ...updates, updatedAt: new Date().toISOString() };
-    this.recalculateProjectProgress(this.tasks[idx].projectId);
-    await this.logAudit('Tâche Modifiée', 'task', taskId, this.tasks[idx].title, 'Champs mis à jour');
-    this.notify();
+
+    await this.logAudit('Tâche Modifiée', 'task', taskId, updatedTask?.title || taskId, 'Champs mis à jour');
   }
 
   async updateTaskStatus(taskId: string, newStatus: TaskStatus, blockerReason?: string) {
@@ -743,15 +780,15 @@ class AppStore {
     else if (newStatus !== 'Blocked') updates.blockerReason = undefined;
     if (newStatus === 'Completed') updates.completedAt = new Date().toISOString();
 
+    this.tasks = this.tasks.map((t) => t.id === taskId ? { ...t, ...updates } : t);
+    this.recalculateProjectProgress(task.projectId);
+    this.notify();
+
     if (isFirebaseConfigured) {
       await db.updateTask(taskId, updates);
-    } else {
-      Object.assign(task, updates);
-      this.recalculateProjectProgress(task.projectId);
     }
 
     await this.logAudit('Changement de Statut', 'task', taskId, task.title, `De « ${oldStatus} » à « ${newStatus} »${blockerReason ? ` (Raison: ${blockerReason})` : ''}`);
-    this.notify();
   }
 
   async submitTaskForReview(taskId: string) {
@@ -764,17 +801,17 @@ class AppStore {
       throw new Error('Vous n\'avez pas l\'autorisation de soumettre cette tâche.');
     }
 
+    task.status = 'In Review';
+    task.updatedAt = new Date().toISOString();
+    this.notify();
+
     if (isFirebaseConfigured) {
       await db.updateTask(taskId, { status: 'In Review', updatedAt: new Date().toISOString() });
-    } else {
-      task.status = 'In Review';
-      task.updatedAt = new Date().toISOString();
     }
 
     const reviewerId = task.reviewerId || this.users.find((u) => u.role === 'super_admin')?.id || this.getCurrentUser().id;
     await this.notifyUser(reviewerId, 'review_requested', 'Revue Demandée', `${this.getCurrentUser().firstName} a soumis « ${task.title} » pour revue.`, `/tasks/${task.id}`);
     await this.logAudit('Soumis pour Revue', 'task', taskId, task.title, 'En attente de validation');
-    this.notify();
   }
 
   async approveTask(taskId: string, validationComment?: string) {
@@ -796,18 +833,18 @@ class AppStore {
       validationComment
     };
 
+    this.tasks = this.tasks.map((t) => t.id === taskId ? { ...t, ...updates } : t);
+    this.recalculateProjectProgress(task.projectId);
+    this.notify();
+
     if (isFirebaseConfigured) {
       await db.updateTask(taskId, updates);
-    } else {
-      Object.assign(task, updates);
-      this.recalculateProjectProgress(task.projectId);
     }
 
     for (const uid of task.assigneeIds) {
       await this.notifyUser(uid, 'task_approved', 'Tâche Approuvée !', `Votre tâche « ${task.title} » a été approuvée par ${this.getCurrentUser().firstName}.`, `/tasks/${task.id}`);
     }
     await this.logAudit('Tâche Approuvée', 'task', taskId, task.title, validationComment || 'Marquée terminée');
-    this.notify();
   }
 
   async rejectTask(taskId: string, feedback: string) {
@@ -826,17 +863,17 @@ class AppStore {
       updatedAt: new Date().toISOString()
     };
 
+    this.tasks = this.tasks.map((t) => t.id === taskId ? { ...t, ...updates } : t);
+    this.notify();
+
     if (isFirebaseConfigured) {
       await db.updateTask(taskId, updates);
-    } else {
-      Object.assign(task, updates);
     }
 
     for (const uid of task.assigneeIds) {
       await this.notifyUser(uid, 'task_rejected', 'Modifications Demandées', `${this.getCurrentUser().firstName} a demandé des modifications sur « ${task.title} »: ${feedback}`, `/tasks/${task.id}`);
     }
     await this.logAudit('Modifications Demandées', 'task', taskId, task.title, `Retour en cours. Feedback: ${feedback}`);
-    this.notify();
   }
 
   async toggleSubtask(taskId: string, subtaskId: string) {
@@ -855,19 +892,17 @@ class AppStore {
       s.id === subtaskId ? { ...s, completed: !s.completed } : s
     );
 
+    this.tasks = this.tasks.map((t) => t.id === taskId ? { ...t, subtasks: updatedSubtasks, updatedAt: new Date().toISOString() } : t);
+    this.notify();
+
     if (isFirebaseConfigured) {
       await db.updateTask(taskId, { subtasks: updatedSubtasks, updatedAt: new Date().toISOString() });
-    } else {
-      sub.completed = !sub.completed;
-      task.updatedAt = new Date().toISOString();
-      this.notify();
     }
   }
 
   async addSubtask(taskId: string, title: string) {
     const task = this.tasks.find((t) => t.id === taskId);
     if (!task) return;
-    // SÉCURITÉ : Vérifier l'autorisation
     const user = this.getCurrentUser();
     const proj = this.projects.find((p) => p.id === task.projectId);
     if (!canEditTask(user, task.assigneeIds, proj)) {
@@ -876,12 +911,45 @@ class AppStore {
     const newSub: Subtask = { id: `sub-${Date.now()}`, title, completed: false };
     const updatedSubtasks = [...task.subtasks, newSub];
 
+    this.tasks = this.tasks.map((t) => t.id === taskId ? { ...t, subtasks: updatedSubtasks, updatedAt: new Date().toISOString() } : t);
+    this.notify();
+
     if (isFirebaseConfigured) {
       await db.updateTask(taskId, { subtasks: updatedSubtasks, updatedAt: new Date().toISOString() });
-    } else {
-      task.subtasks.push(newSub);
-      task.updatedAt = new Date().toISOString();
-      this.notify();
+    }
+  }
+
+  async editSubtask(taskId: string, subtaskId: string, title: string) {
+    const task = this.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === task.projectId);
+    if (!canEditTask(user, task.assigneeIds, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de modifier cette tâche.');
+    }
+    const updatedSubtasks = task.subtasks.map((s) => s.id === subtaskId ? { ...s, title: title.trim() } : s);
+    this.tasks = this.tasks.map((t) => t.id === taskId ? { ...t, subtasks: updatedSubtasks, updatedAt: new Date().toISOString() } : t);
+    this.notify();
+
+    if (isFirebaseConfigured) {
+      await db.updateTask(taskId, { subtasks: updatedSubtasks, updatedAt: new Date().toISOString() });
+    }
+  }
+
+  async deleteSubtask(taskId: string, subtaskId: string) {
+    const task = this.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const user = this.getCurrentUser();
+    const proj = this.projects.find((p) => p.id === task.projectId);
+    if (!canEditTask(user, task.assigneeIds, proj)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de modifier cette tâche.');
+    }
+    const updatedSubtasks = task.subtasks.filter((s) => s.id !== subtaskId);
+    this.tasks = this.tasks.map((t) => t.id === taskId ? { ...t, subtasks: updatedSubtasks, updatedAt: new Date().toISOString() } : t);
+    this.notify();
+
+    if (isFirebaseConfigured) {
+      await db.updateTask(taskId, { subtasks: updatedSubtasks, updatedAt: new Date().toISOString() });
     }
   }
 
@@ -895,12 +963,14 @@ class AppStore {
       content
     };
 
+    let newComment: Comment;
     if (isFirebaseConfigured) {
-      await db.addCommentDb(comment);
+      newComment = await db.addCommentDb(comment);
+      // onSnapshot mettra à jour this.comments avec la vraie source de vérité
     } else {
-      const entry: Comment = { ...comment, id: `comm-${Date.now()}`, createdAt: new Date().toISOString() };
-      if (!this.comments[taskId]) this.comments[taskId] = [];
-      this.comments[taskId].push(entry);
+      newComment = { ...comment, id: `comm-${Date.now()}`, createdAt: new Date().toISOString() };
+      this.comments = { ...this.comments, [taskId]: [...(this.comments[taskId] || []), newComment] };
+      this.notify();
     }
 
     const task = this.tasks.find((t) => t.id === taskId);
@@ -911,7 +981,39 @@ class AppStore {
         }
       }
     }
+  }
+
+  async editComment(commentId: string, taskId: string, content: string) {
+    const user = this.getCurrentUser();
+    const list = this.comments[taskId] || [];
+    const idx = list.findIndex((c) => c.id === commentId);
+    if (idx === -1) return;
+    if (list[idx].authorId !== user.id && !isAdmin(user)) {
+      throw new Error('Vous ne pouvez modifier que vos propres commentaires.');
+    }
+    const newList = list.map((c) => c.id === commentId ? { ...c, content: content.trim() } : c);
+    this.comments = { ...this.comments, [taskId]: newList };
     this.notify();
+
+    if (isFirebaseConfigured) {
+      await db.updateCommentDb(commentId, { content: content.trim() });
+    }
+  }
+
+  async deleteComment(commentId: string, taskId: string) {
+    const user = this.getCurrentUser();
+    const list = this.comments[taskId] || [];
+    const comment = list.find((c) => c.id === commentId);
+    if (!comment) return;
+    if (comment.authorId !== user.id && !isAdmin(user)) {
+      throw new Error('Vous ne pouvez supprimer que vos propres commentaires.');
+    }
+    this.comments = { ...this.comments, [taskId]: list.filter((c) => c.id !== commentId) };
+    this.notify();
+
+    if (isFirebaseConfigured) {
+      await db.deleteComment(commentId);
+    }
   }
 
   // ---------- Team Operations ----------
@@ -1164,13 +1266,6 @@ class AppStore {
     if (projIdx === -1) return;
     const projTasks = this.tasks.filter((t) => t.projectId === projectId);
 
-    // BUG FIX: reset to 0 when no tasks remain
-    if (projTasks.length === 0) {
-      this.projects[projIdx].weightedProgress = 0;
-      this.projects[projIdx].health = 'on_track';
-      return;
-    }
-
     let totalWeight = 0, completedWeight = 0, overdueCount = 0, blockedCount = 0;
     const nowStr = new Date().toISOString().split('T')[0];
     projTasks.forEach((t) => {
@@ -1181,13 +1276,14 @@ class AppStore {
       if (t.status !== 'Completed' && t.dueDate < nowStr) overdueCount += 1;
     });
 
-    const progress = Math.round((completedWeight / totalWeight) * 100);
-    this.projects[projIdx].weightedProgress = progress;
-
+    const progress = projTasks.length === 0 ? 0 : Math.round((completedWeight / totalWeight) * 100);
     let health: Project['health'] = 'on_track';
     if (blockedCount > 0 || overdueCount >= 2) health = 'delayed';
     else if (overdueCount === 1 || progress < 40) health = 'at_risk';
-    this.projects[projIdx].health = health;
+
+    this.projects = this.projects.map((p) =>
+      p.id === projectId ? { ...p, weightedProgress: progress, health } : p
+    );
   }
 
   async createProject(projData: Omit<Project, 'id' | 'organizationId' | 'createdAt' | 'updatedAt' | 'weightedProgress'>): Promise<Project> {
@@ -1200,6 +1296,8 @@ class AppStore {
 
     if (isFirebaseConfigured) {
       const newProj = await db.createProject(projData, orgId);
+      this.projects = [newProj, ...this.projects];
+      this.notify();
       await this.logAudit('Projet Créé', 'project', newProj.id, newProj.name, `Santé: ${newProj.health}`);
       return newProj;
     }
@@ -1225,16 +1323,26 @@ class AppStore {
     if (!canEditProject(user, proj)) {
       throw new Error('Vous n\'avez pas l\'autorisation de modifier ce projet.');
     }
+    const previousMembers = this.projects.find((p) => p.id === projectId)?.members || [];
+    this.projects = this.projects.map((p) =>
+      p.id === projectId ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p
+    );
+    this.notify();
+
+    const newMemberIds = (updates.members || [])
+      .map((m) => m.userId)
+      .filter((uid) => !previousMembers.some((m) => m.userId === uid));
+
+    for (const uid of newMemberIds) {
+      if (uid !== this.getCurrentUser().id) {
+        await this.notifyUser(uid, 'new_member', 'Ajouté à un projet', `${this.getCurrentUser().firstName} vous a ajouté au projet « ${proj?.name || projectId} ».`, `/projects/${projectId}`);
+      }
+    }
+
     if (isFirebaseConfigured) {
       await db.updateProject(projectId, updates);
       if (proj) await this.logAudit('Projet Modifié', 'project', projectId, proj.name, 'Champs mis à jour');
-      return;
     }
-    const idx = this.projects.findIndex((p) => p.id === projectId);
-    if (idx === -1) return;
-    this.projects[idx] = { ...this.projects[idx], ...updates, updatedAt: new Date().toISOString() };
-    await this.logAudit('Projet Modifié', 'project', projectId, this.projects[idx].name, 'Champs mis à jour');
-    this.notify();
   }
 
   async deleteProject(projectId: string) {
@@ -1244,12 +1352,15 @@ class AppStore {
       throw new Error('Vous n\'avez pas l\'autorisation de supprimer ce projet.');
     }
     const proj = this.projects.find((p) => p.id === projectId);
+    this.projects = this.projects.filter((p) => p.id !== projectId);
+    this.tasks = this.tasks.filter((t) => t.projectId !== projectId);
+    this.notify();
+
     if (isFirebaseConfigured) {
       await db.deleteProject(projectId);
       await this.logAudit('Projet Supprimé', 'project', projectId, proj?.name || projectId);
       return;
     }
-    this.projects = this.projects.filter((p) => p.id !== projectId);
     this.tasks = this.tasks.filter((t) => t.projectId !== projectId);
     await this.logAudit('Projet Supprimé', 'project', projectId, proj?.name || projectId);
     this.notify();
@@ -1263,12 +1374,15 @@ class AppStore {
     if (!canDeleteTask(user, proj)) {
       throw new Error('Vous n\'avez pas l\'autorisation de supprimer cette tâche.');
     }
+    this.tasks = this.tasks.filter((t) => t.id !== taskId);
+    if (task) this.recalculateProjectProgress(task.projectId);
+    this.notify();
+
     if (isFirebaseConfigured) {
       await db.deleteTask(taskId);
       await this.logAudit('Tâche Supprimée', 'task', taskId, task?.title || taskId);
       return;
     }
-    this.tasks = this.tasks.filter((t) => t.id !== taskId);
     if (task) this.recalculateProjectProgress(task.projectId);
     await this.logAudit('Tâche Supprimée', 'task', taskId, task?.title || taskId);
     this.notify();
@@ -1339,6 +1453,20 @@ class AppStore {
   }
 
   // ---------- Daily Reports ----------
+  private getAttendanceRecordWorkMinutes(r: AttendanceRecord): number {
+    if (r.status === 'completed') return r.totalWorkMinutes || 0;
+    if (!r.startTime) return 0;
+    const [sh, sm] = r.startTime.split(':').map(Number);
+    const start = new Date();
+    start.setHours(sh, sm, 0, 0);
+    let elapsed = (Date.now() - start.getTime()) / 60000;
+    if (elapsed < 0) elapsed += 24 * 60;
+    let breakMins = r.totalBreakMinutes || 0;
+    if (r.status === 'on_break' && r.breakStartTime) {
+      breakMins += (Date.now() - new Date(r.breakStartTime).getTime()) / 60000;
+    }
+    return Math.max(0, Math.round(elapsed - breakMins));
+  }
 
   async generateDailyReport(teamId?: string): Promise<DailyReport> {
     // SÉCURITÉ : Vérifier l'autorisation
@@ -1383,6 +1511,44 @@ class AppStore {
       ? overdueTasks.map((t) => `Finaliser: ${t.title}`)
       : ['Aucune priorité urgente identifiée'];
 
+    const completedToday = teamTasks
+      .filter((t) => t.status === 'Completed')
+      .map((t) => {
+        const p = this.projects.find((pr) => pr.id === t.projectId);
+        return { title: t.title, projectName: p?.name || 'Sans projet' };
+      });
+
+    const inProgressToday = teamTasks
+      .filter((t) => t.status === 'In Progress')
+      .map((t) => {
+        const p = this.projects.find((pr) => pr.id === t.projectId);
+        const assignee = this.users.find((u) => t.assigneeIds.includes(u.id));
+        return {
+          title: t.title,
+          projectName: p?.name || 'Sans projet',
+          assigneeName: assignee ? `${assignee.firstName} ${assignee.lastName}` : 'Non assigné'
+        };
+      });
+
+    const attendanceDetails = todayAttendance.map((r) => {
+      const u = this.users.find((usr) => usr.id === r.userId);
+      return {
+        name: u ? `${u.firstName} ${u.lastName}` : 'Inconnu',
+        status: r.status,
+        workMinutes: this.getAttendanceRecordWorkMinutes(r)
+      };
+    });
+
+    const workDaySummaries = this.workDayReports
+      .filter((r) => r.date === today && r.status === 'submitted')
+      .map((r) => {
+        const u = this.users.find((usr) => usr.id === r.userId);
+        return {
+          name: u ? `${u.firstName} ${u.lastName}` : 'Inconnu',
+          summary: r.summary
+        };
+      });
+
     const report: Omit<DailyReport, 'id'> = {
       organizationId: orgId,
       teamId,
@@ -1399,6 +1565,10 @@ class AppStore {
       blockers,
       projectProgress,
       prioritiesTomorrow,
+      completedToday,
+      inProgressToday,
+      attendanceDetails,
+      workDaySummaries,
       recipients: this.getOrganization().reportEmailRecipients,
       status: 'draft'
     };
@@ -1416,6 +1586,19 @@ class AppStore {
     return entry;
   }
 
+  async deleteReport(reportId: string) {
+    const user = this.getCurrentUser();
+    if (!canGenerateOrgReport(user)) {
+      throw new Error('Vous n\'avez pas l\'autorisation de supprimer un rapport.');
+    }
+    this.reports = this.reports.filter((r) => r.id !== reportId);
+    if (isFirebaseConfigured) {
+      await db.deleteReport(reportId);
+    }
+    await this.logAudit('Rapport Supprimé', 'report', reportId, `Rapport supprimé`);
+    this.notify();
+  }
+
   async sendReportEmail(reportId: string) {
     // SÉCURITÉ : Vérifier l'autorisation
     const user = this.getCurrentUser();
@@ -1425,12 +1608,12 @@ class AppStore {
     const rep = this.reports.find((r) => r.id === reportId);
     if (!rep) return;
 
-    // Call backend to dispatch email via Resend
+    // Call backend to dispatch email
     try {
       // SÉCURITÉ : Envoyer le token Firebase pour l'authentification serveur
       const { auth } = await import('./firebase');
       const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
-      await fetch('/api/reports/send', {
+      const response = await fetch('/api/reports/send', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1444,20 +1627,28 @@ class AppStore {
             generatedBy: rep.generatedBy,
             attendanceSummary: rep.attendanceSummary,
             tasksSummary: rep.tasksSummary,
-            blockers: rep.blockers
+            blockers: rep.blockers,
+            prioritiesTomorrow: rep.prioritiesTomorrow
           }
         })
       });
-    } catch (e) {
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        throw new Error(data.error || 'Échec de l\'envoi du rapport.');
+      }
+      if (data.simulated) {
+        console.warn('[Reports] Envoi simulé :', data.message);
+      }
+    } catch (e: any) {
       console.error('[Reports] Erreur envoi e-mail:', e);
+      throw new Error(e.message || 'Échec de l\'envoi du rapport.');
     }
 
     const updates: Partial<DailyReport> = { status: 'sent', sentAt: new Date().toISOString() };
     if (isFirebaseConfigured) {
       await db.updateReport(reportId, updates);
-    } else {
-      Object.assign(rep, updates);
     }
+    this.reports = this.reports.map((r) => r.id === reportId ? { ...r, ...updates } : r);
 
     await this.logAudit('Rapport Envoyé', 'report', reportId, `Rapport du ${rep.date}`, `Destinataires: ${rep.recipients.join(', ')}`);
     this.notify();
@@ -1482,6 +1673,14 @@ class AppStore {
       return;
     }
     this.notifications.forEach((n) => { if (n.userId === uid) n.read = true; });
+    this.notify();
+  }
+
+  async deleteNotification(id: string) {
+    if (isFirebaseConfigured) {
+      await db.deleteNotification(id);
+    }
+    this.notifications = this.notifications.filter((n) => n.id !== id);
     this.notify();
   }
 }

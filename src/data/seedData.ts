@@ -28,7 +28,8 @@ export const initialOrganization: Organization = {
   } as any,
   workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
   defaultWorkdayDurationHours: 8,
-  reportEmailRecipients: ['cto@acmedigital.com', 'nizarrallii85@gmail.com']
+  reportEmailRecipients: ['cto@acmedigital.com', 'nizarrallii85@gmail.com'],
+  includeAdminsInReports: true
 };
 
 export const initialUsers: User[] = [
