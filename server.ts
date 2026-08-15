@@ -218,9 +218,8 @@ function sanitizeFilename(filename: string): string {
   return sanitized.substring(0, 100);
 }
 
-async function startServer() {
+export async function buildApp() {
   const app = express();
-  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
   // SÉCURITÉ : Trust proxy (pour rate limiting correct derrière un proxy)
   app.set('trust proxy', 1);
@@ -1504,9 +1503,16 @@ async function startServer() {
     });
   }
 
+  return app;
+}
+
+const app = await buildApp();
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+
+if (!process.env.VERCEL) {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`LE LOUI PARFAIT Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer();
+export default app;
