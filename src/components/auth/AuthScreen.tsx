@@ -94,7 +94,6 @@ const SetupScreen: React.FC = () => {
           muted
           loop
           playsInline
-          poster="/logo-horizontal.png"
         >
           <source src="/auth-bg.mp4" type="video/mp4" />
         </video>
@@ -257,7 +256,6 @@ const LoginScreen: React.FC = () => {
           muted
           loop
           playsInline
-          poster="/logo-horizontal.png"
         >
           <source src="/auth-bg.mp4" type="video/mp4" />
         </video>
