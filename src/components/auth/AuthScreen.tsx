@@ -27,7 +27,7 @@ export const AuthScreen: React.FC = () => {
   return <LoginScreen />;
 };
 
-// ============== SHARED BRANDING ==============
+// ============== SHARED BRANDING ================
 
 const BrandLogo: React.FC<{ className?: string }> = ({ className = '' }) => (
   <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className={`h-10 w-auto ${className}`} />
