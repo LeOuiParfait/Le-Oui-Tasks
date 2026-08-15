@@ -127,6 +127,8 @@ function mapOrganization(id: string, data: any): Organization {
  */
 export async function isSystemInitialized(): Promise<boolean> {
   if (!isFirebaseConfigured) return true; // Local mode bypasses setup
+  // Évite un appel Firestore (et une erreur de permission/quota) s'il n'y a pas encore d'utilisateur
+  if (!auth.currentUser) return true;
   try {
     const snap = await getDocs(query(collection(db, USERS_COLLECTION), limit(1)));
     return !snap.empty;
