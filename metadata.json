@@ -1,6 +1,0 @@
-{
-  "name": "Tasking - Remote Work & Project Platform",
-  "description": "Production-ready remote workspace platform for teams, presence tracking, project Kanban, task validation, objectives, daily reports, and performance analytics.",
-  "requestFramePermissions": ["camera", "microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
