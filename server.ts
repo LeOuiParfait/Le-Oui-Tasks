@@ -1515,9 +1515,11 @@ export async function buildApp() {
 }
 
 if (!process.env.VERCEL) {
-  const app = await buildApp();
-  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`LE LOUI PARFAIT Server running on http://0.0.0.0:${PORT}`);
-  });
+  (async () => {
+    const app = await buildApp();
+    const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`LE LOUI PARFAIT Server running on http://0.0.0.0:${PORT}`);
+    });
+  })();
 }
