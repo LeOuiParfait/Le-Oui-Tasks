@@ -4,16 +4,10 @@ import fs from 'fs';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
-import { createServer as createViteServer } from 'vite';
 import multer from 'multer';
 import helmet from 'helmet';
 import cors from 'cors';
 import { rateLimit } from 'express-rate-limit';
-import { initializeApp as adminInitApp, cert as adminCert } from 'firebase-admin/app';
-import { getAuth as adminGetAuth } from 'firebase-admin/auth';
-import { getStorage as adminGetStorage } from 'firebase-admin/storage';
-import { getFirestore as adminGetFirestore } from 'firebase-admin/firestore';
-import { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 
 // Augment Express Request with multer's file property (déplacé plus bas avec authUser)
 
@@ -93,12 +87,31 @@ function emailLayoutHtml(title: string, body: string, action?: { label: string; 
 }
 
 // --- Firebase Admin SDK (server-side, bypasses CORS & security rules) ---
+// Chargement dynamique pour éviter les crashs au démarrage sur Vercel si le module pose problème
 let adminApp: any = null;
 let adminAuth: any = null;
 let adminFirestore: any = null;
 let adminStorage: any = null;
+let adminModules: any = null;
 
-function getAdminApp() {
+async function loadAdminModules() {
+  if (adminModules) return adminModules;
+  const [
+    { initializeApp: adminInitApp, cert: adminCert },
+    { getAuth: adminGetAuth },
+    { getFirestore: adminGetFirestore },
+    { getStorage: adminGetStorage }
+  ] = await Promise.all([
+    import('firebase-admin/app'),
+    import('firebase-admin/auth'),
+    import('firebase-admin/firestore'),
+    import('firebase-admin/storage')
+  ]);
+  adminModules = { adminInitApp, adminCert, adminGetAuth, adminGetFirestore, adminGetStorage };
+  return adminModules;
+}
+
+async function getAdminApp() {
   if (adminApp) return adminApp;
   const projectId = process.env.FIREBASE_PROJECT_ID;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
@@ -107,6 +120,8 @@ function getAdminApp() {
   if (!projectId || !privateKey || !clientEmail) {
     throw new Error('Firebase Admin SDK credentials missing in .env.local');
   }
+
+  const { adminInitApp, adminCert, adminGetAuth, adminGetFirestore, adminGetStorage } = await loadAdminModules();
 
   adminApp = adminInitApp({
     credential: adminCert({ projectId, privateKey, clientEmail }),
@@ -118,15 +133,15 @@ function getAdminApp() {
   return adminApp;
 }
 
-function getAdminAuth() {
+async function getAdminAuth() {
   if (adminAuth) return adminAuth;
-  getAdminApp();
+  await getAdminApp();
   return adminAuth;
 }
 
-function getAdminFirestore() {
+async function getAdminFirestore() {
   if (adminFirestore) return adminFirestore;
-  getAdminApp();
+  await getAdminApp();
   return adminFirestore;
 }
 
@@ -171,7 +186,7 @@ async function requireAuth(req: Request, res: Response, next: NextFunction) {
     }
 
     const idToken = authHeader.split('Bearer ')[1];
-    const auth = getAdminAuth();
+    const auth = await getAdminAuth();
     const decodedToken = await auth.verifyIdToken(idToken);
     req.authUser = { uid: decodedToken.uid, email: decodedToken.email };
     next();
@@ -369,7 +384,7 @@ export async function buildApp() {
       }
 
       // Vérifier que l'appelant est admin ou super_admin
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       const callerDoc = await db.collection('users').doc(req.authUser!.uid).get();
       if (!callerDoc.exists) {
         return res.status(403).json({ error: 'Profil introuvable.' });
@@ -379,7 +394,7 @@ export async function buildApp() {
         return res.status(403).json({ error: 'Seuls les administrateurs peuvent générer des liens d\'activation.' });
       }
 
-      const auth = getAdminAuth();
+      const auth = await getAdminAuth();
       const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
 
       // Resolve Firebase UID for this email if not provided
@@ -503,8 +518,8 @@ export async function buildApp() {
         return res.status(400).json({ error: 'Email requis.' });
       }
 
-      const auth = getAdminAuth();
-      const db = getAdminFirestore();
+      const auth = await getAdminAuth();
+      const db = await getAdminFirestore();
 
       // Resolve Firebase UID for this email
       let uid: string | null = null;
@@ -702,7 +717,7 @@ export async function buildApp() {
         return res.status(400).json({ error: 'Token requis.' });
       }
 
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       const tokenDoc = await db.collection('passwordResets').doc(token).get();
 
       if (!tokenDoc.exists) {
@@ -738,8 +753,8 @@ export async function buildApp() {
         return res.status(400).json({ error: 'Le mot de passe doit contenir au moins une majuscule, une minuscule et un chiffre.' });
       }
 
-      const db = getAdminFirestore();
-      const auth = getAdminAuth();
+      const db = await getAdminFirestore();
+      const auth = await getAdminAuth();
 
       const tokenRef = db.collection('passwordResets').doc(token);
 
@@ -798,7 +813,7 @@ export async function buildApp() {
       }
 
       // SÉCURITÉ : Vérifier que l'appelant est admin ou super_admin
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       const callerDoc = await db.collection('users').doc(req.authUser!.uid).get();
       if (!callerDoc.exists) {
         return res.status(403).json({ error: 'Profil introuvable.' });
@@ -837,7 +852,7 @@ export async function buildApp() {
       }
 
       // Créer l'utilisateur via Firebase Admin SDK
-      const auth = getAdminAuth();
+      const auth = await getAdminAuth();
       let userRecord;
       try {
         userRecord = await auth.createUser({
@@ -960,7 +975,7 @@ export async function buildApp() {
         return res.status(400).json({ error: 'targetUserId et newRole requis.' });
       }
 
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       const callerDoc = await db.collection('users').doc(req.authUser!.uid).get();
       if (!callerDoc.exists) {
         return res.status(403).json({ error: 'Profil introuvable.' });
@@ -1024,7 +1039,7 @@ export async function buildApp() {
       }
 
       // Vérifier que l'user a le droit d'envoyer des rapports (admin, super_admin, manager, team_lead)
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       const callerDoc = await db.collection('users').doc(req.authUser!.uid).get();
       if (!callerDoc.exists) {
         return res.status(403).json({ error: 'Profil introuvable.' });
@@ -1199,7 +1214,7 @@ export async function buildApp() {
     console.log(`[Cron] Envoi automatique des rapports pour ${todayStr} à ${now.toISOString()}`);
 
     try {
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       const resendApiKey = process.env.RESEND_API_KEY;
 
       // Récupérer toutes les organisations
@@ -1215,7 +1230,7 @@ export async function buildApp() {
           .where('date', '==', todayStr)
           .get();
 
-        const present = attendanceSnap.docs.filter((d: QueryDocumentSnapshot) => {
+        const present = attendanceSnap.docs.filter((d: any) => {
           const s = d.data().status;
           return s !== 'absent';
         }).length;
@@ -1226,7 +1241,7 @@ export async function buildApp() {
           .where('organizationId', '==', orgDoc.id)
           .get();
 
-        const tasks = tasksSnap.docs.map((d: QueryDocumentSnapshot) => d.data());
+        const tasks = tasksSnap.docs.map((d: any) => d.data());
         const completed = tasks.filter((t: any) => t.status === 'Completed').length;
         const inProgress = tasks.filter((t: any) => t.status === 'In Progress').length;
         const blocked = tasks.filter((t: any) => t.status === 'Blocked').length;
@@ -1337,7 +1352,7 @@ export async function buildApp() {
       }
       let decodedUid: string;
       try {
-        const auth = getAdminAuth();
+        const auth = await getAdminAuth();
         const decoded = await auth.verifyIdToken(idToken);
         decodedUid = decoded.uid;
       } catch {
@@ -1349,7 +1364,7 @@ export async function buildApp() {
         res.status(403).json({ error: 'Vous ne pouvez modifier que votre propre présence.' });
         return;
       }
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       const updates: any = {
         presenceStatus: status || 'away',
         lastActiveAt: new Date().toISOString()
@@ -1375,7 +1390,7 @@ export async function buildApp() {
         res.status(403).json({ error: 'Vous ne pouvez envoyer un heartbeat que pour vous-même.' });
         return;
       }
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       const now = new Date().toISOString();
       const updates: any = {
         lastActiveAt: now
@@ -1395,7 +1410,7 @@ export async function buildApp() {
       if (!record || record.userId !== req.authUser?.uid) {
         return res.status(403).json({ error: 'Vous ne pouvez pointer que pour vous-même.' });
       }
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       await db.collection('attendance').doc(record.id).set(record, { merge: true });
       await db.collection('users').doc(record.userId).update({ presenceStatus: 'online', lastActiveAt: new Date().toISOString() });
       res.json({ success: true, record });
@@ -1411,7 +1426,7 @@ export async function buildApp() {
       if (!record || record.userId !== req.authUser?.uid) {
         return res.status(403).json({ error: 'Vous ne pouvez pointer que pour vous-même.' });
       }
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       await db.collection('attendance').doc(record.id).set(record, { merge: true });
       await db.collection('users').doc(record.userId).update({ presenceStatus: 'offline', lastActiveAt: new Date().toISOString() });
       res.json({ success: true, record });
@@ -1427,7 +1442,7 @@ export async function buildApp() {
       if (!record || record.userId !== req.authUser?.uid) {
         return res.status(403).json({ error: 'Vous ne pouvez modifier que votre propre pointage.' });
       }
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       await db.collection('attendance').doc(record.id).set(record, { merge: true });
       await db.collection('users').doc(record.userId).update({ presenceStatus: presence || record.status, lastActiveAt: new Date().toISOString() });
       res.json({ success: true, record });
@@ -1445,7 +1460,7 @@ export async function buildApp() {
         return res.status(400).json({ error: 'taskId requis.' });
       }
       console.log('[Tasks] update request:', taskId, req.authUser?.uid, JSON.stringify(updates).slice(0, 200));
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       await db.collection('tasks').doc(taskId).set({
         ...updates,
         updatedAt: new Date().toISOString()
@@ -1462,7 +1477,7 @@ export async function buildApp() {
   const STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
   async function checkStaleUsers() {
     try {
-      const db = getAdminFirestore();
+      const db = await getAdminFirestore();
       const now = Date.now();
       // Récupérer tous les users "online"
       const onlineSnap = await db.collection('users').where('presenceStatus', '==', 'online').get();
@@ -1485,6 +1500,7 @@ export async function buildApp() {
 
   // --- Vite Dev Server Middleware vs Production Static Serving ---
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
