@@ -1330,9 +1330,11 @@ export async function buildApp() {
     }
   }
 
-  // Lancer le cron toutes les 60 secondes
-  setInterval(autoSendDailyReports, 60 * 1000);
-  console.log(`[Cron] Envoi automatique des rapports programmé à ${REPORT_SEND_HOUR}h${REPORT_SEND_MINUTE.toString().padStart(2, '0')} les jours ouvrables`);
+  // Lancer le cron toutes les 60 secondes (pas sur Vercel)
+  if (!process.env.VERCEL) {
+    setInterval(autoSendDailyReports, 60 * 1000);
+    console.log(`[Cron] Envoi automatique des rapports programmé à ${REPORT_SEND_HOUR}h${REPORT_SEND_MINUTE.toString().padStart(2, '0')} les jours ouvrables`);
+  }
 
   // --- Endpoint : Marquer un user comme away (sendBeacon à la fermeture) ---
   // Note : sendBeacon ne supporte pas les headers Authorization, donc on valide le userId
@@ -1494,9 +1496,11 @@ export async function buildApp() {
       console.error('[StaleCheck] Erreur:', err);
     }
   }
-  // Vérifier toutes les 5 minutes
-  setInterval(checkStaleUsers, 5 * 60 * 1000);
-  console.log('[StaleCheck] Vérification des users inactifs toutes les 5 minutes');
+  // Vérifier toutes les 5 minutes (pas sur Vercel)
+  if (!process.env.VERCEL) {
+    setInterval(checkStaleUsers, 5 * 60 * 1000);
+    console.log('[StaleCheck] Vérification des users inactifs toutes les 5 minutes');
+  }
 
   // --- Vite Dev Server Middleware vs Production Static Serving ---
   if (process.env.NODE_ENV !== 'production') {
