@@ -368,9 +368,15 @@ export async function resetPassword(email: string): Promise<void> {
       body: JSON.stringify({ email })
     });
 
-    const data = await response.json().catch(() => ({ error: 'Erreur serveur.' }));
+    const text = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { error: text || 'Erreur serveur.' };
+    }
     if (!response.ok) {
-      throw new Error(data.error || 'Erreur lors de la demande de réinitialisation.');
+      throw new Error(data.error || text || 'Erreur lors de la demande de réinitialisation.');
     }
   } catch (error: any) {
     console.error('[Auth] Error sending password reset request:', error);

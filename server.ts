@@ -31,6 +31,9 @@ if (!process.env.APP_BASE_URL) {
 const APP_BASE_URL = (process.env.APP_BASE_URL || process.env.APP_URL || process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const LOGO_URL = APP_BASE_URL ? `${APP_BASE_URL}/logo-horizontal.png` : '';
 
+// Port utilisé localement et dans les fallbacks
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+
 function emailLogoHtml(appName?: string): string {
   if (LOGO_URL) {
     return `<img src="${LOGO_URL}" alt="${escapeHtml(appName || 'LE LOUI PARFAIT')}" style="height:40px;width:auto;display:inline-block;" />`;
@@ -1523,7 +1526,6 @@ export async function buildApp() {
 if (!process.env.VERCEL) {
   (async () => {
     const app = await buildApp();
-    const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`LE LOUI PARFAIT Server running on http://0.0.0.0:${PORT}`);
     });
