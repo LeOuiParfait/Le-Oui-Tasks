@@ -1,3 +1,15 @@
-import app from '../server';
+import { buildApp } from '../server';
 
-export default (req: any, res: any) => app(req, res);
+let app: any = null;
+
+export default async (req: any, res: any) => {
+  try {
+    if (!app) {
+      app = await buildApp();
+    }
+    app(req, res);
+  } catch (err: any) {
+    console.error('[API] buildApp error:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+};

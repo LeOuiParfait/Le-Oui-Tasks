@@ -1296,8 +1296,7 @@ class AppStore {
 
     if (isFirebaseConfigured) {
       const newProj = await db.createProject(projData, orgId);
-      this.projects = [newProj, ...this.projects];
-      this.notify();
+      // Laisse onSnapshot mettre à jour this.projects pour éviter les doublons
       await this.logAudit('Projet Créé', 'project', newProj.id, newProj.name, `Santé: ${newProj.health}`);
       return newProj;
     }

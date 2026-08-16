@@ -30,7 +30,7 @@ export const AuthScreen: React.FC = () => {
 // ============== SHARED BRANDING ================
 
 const BrandLogo: React.FC<{ className?: string }> = ({ className = '' }) => (
-  <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className={`h-10 w-auto ${className}`} />
+  <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className={`h-20 w-auto ${className}`} />
 );
 
 // ============== SETUP SCREEN ==============
@@ -100,7 +100,7 @@ const SetupScreen: React.FC = () => {
         <div className="absolute inset-0 bg-black/45 z-[1]" />
 
         <div className="relative z-10">
-          <BrandLogo className="h-12" />
+          <BrandLogo className="h-24" />
         </div>
 
         <div className="relative z-10 space-y-8">
@@ -262,7 +262,7 @@ const LoginScreen: React.FC = () => {
         <div className="absolute inset-0 bg-black/45 z-[1]" />
 
         <div className="relative z-10">
-          <BrandLogo className="h-12" />
+          <BrandLogo className="h-24" />
         </div>
 
         <div className="relative z-10 space-y-8">

@@ -126,16 +126,9 @@ function mapOrganization(id: string, data: any): Organization {
  * Fails safe to true (login) so the setup screen is never shown to invited users.
  */
 export async function isSystemInitialized(): Promise<boolean> {
-  if (!isFirebaseConfigured) return true; // Local mode bypasses setup
-  // Évite un appel Firestore (et une erreur de permission/quota) s'il n'y a pas encore d'utilisateur
-  if (!auth.currentUser) return true;
-  try {
-    const snap = await getDocs(query(collection(db, USERS_COLLECTION), limit(1)));
-    return !snap.empty;
-  } catch (err) {
-    console.warn('[Auth] isSystemInitialized query failed, assuming initialized:', err);
-    return true; // Fail-safe: show login, never setup to unauthorized users
-  }
+  // Fail-safe : affiche toujours la page de login, jamais le setup automatiquement.
+  // Cela évite les appels Firestore non autorisés/quota avant connexion.
+  return true;
 }
 
 /**

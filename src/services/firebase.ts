@@ -7,7 +7,6 @@ import {
 } from 'firebase/auth';
 import { 
   getFirestore, 
-  enableIndexedDbPersistence,
   type Firestore 
 } from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
@@ -42,18 +41,7 @@ if (isFirebaseConfigured) {
       console.warn('[Firebase] Impossible de définir la persistance de session:', err);
     });
 
-    // Enable offline persistence for Firestore
-    if (db) {
-      enableIndexedDbPersistence(db).catch((err) => {
-        if (err.code === 'failed-precondition') {
-          console.warn('[Firestore] Persistence offline désactivée : plusieurs onglets ouverts.');
-        } else if (err.code === 'unimplemented') {
-          console.warn('[Firestore] Persistence offline non supportée par ce navigateur.');
-        } else {
-          console.warn('[Firestore] Erreur lors de l\'activation de la persistence:', err);
-        }
-      });
-    }
+    // Pas de persistence offline Firestore : évite les conflits multi-onglets et les erreurs de quota.
   } catch (err) {
     console.error('[Firebase] Erreur d\'initialisation:', err);
   }

@@ -81,7 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Brand Logo + Close (mobile) */}
         <div className="px-5 py-4 flex items-center justify-between border-b border-stone-100">
           <div className="cursor-pointer" onClick={() => handleSelect('kanban')}>
-            <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className="h-9 w-auto" />
+            <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className="h-[4.5rem] w-auto" />
           </div>
           {/* Close button — mobile only */}
           <button

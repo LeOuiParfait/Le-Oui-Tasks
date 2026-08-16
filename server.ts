@@ -19,6 +19,14 @@ import { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 
 dotenv.config({ path: '.env.local' });
 
+// Fallback pour Vercel : si les variables URL ne sont pas définies, utiliser le domaine de prod
+if (!process.env.APP_URL) {
+  process.env.APP_URL = 'https://tasks.leouiparfait.com';
+}
+if (!process.env.APP_BASE_URL) {
+  process.env.APP_BASE_URL = process.env.APP_URL;
+}
+
 // --- Branding pour e-mails ---
 const APP_BASE_URL = (process.env.APP_BASE_URL || process.env.APP_URL || process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const LOGO_URL = APP_BASE_URL ? `${APP_BASE_URL}/logo-horizontal.png` : '';
@@ -1506,13 +1514,10 @@ export async function buildApp() {
   return app;
 }
 
-const app = await buildApp();
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-
 if (!process.env.VERCEL) {
+  const app = await buildApp();
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`LE LOUI PARFAIT Server running on http://0.0.0.0:${PORT}`);
   });
 }
-
-export default app;

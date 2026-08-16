@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Lock, Check, AlertCircle, Loader2, Eye, EyeOff, ArrowRight, Mail } from 'lucide-react';
 
 // BrandLogo - logo horizontal en couleurs d'origine
-const BrandLogo = ({ className = 'h-12' }: { className?: string }) => (
+const BrandLogo = ({ className = 'h-24' }: { className?: string }) => (
   <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className={className} />
 );
 
@@ -16,7 +16,6 @@ const AuthVideoBackground = () => (
       muted
       loop
       playsInline
-      poster="/logo-horizontal.png"
     >
       <source src="/auth-bg.mp4" type="video/mp4" />
     </video>
