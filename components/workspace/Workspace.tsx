@@ -28,6 +28,7 @@ import { ProjectsView } from '@/components/projects/ProjectsView'
 import { DailyReportsView } from '@/components/reports/DailyReportsView'
 import { AnalyticsView } from '@/components/analytics/AnalyticsView'
 import { TeamsView } from '@/components/teams/TeamsView'
+import { NotificationsView } from '@/components/notifications/NotificationsView'
 import { SettingsModal } from '@/components/settings/SettingsModal'
 import { canViewAllTasks, canViewTask } from '@/lib/services/permissions'
 import { usePresenceTracking } from '@/lib/services/usePresenceTracking'
@@ -280,6 +281,14 @@ export function Workspace({ initialView }: { initialView: string }) {
               users={users}
               projects={projects}
               teams={teams}
+            />
+          )}
+          {currentView === 'notifications' && (
+            <NotificationsView
+              notifications={notifications}
+              onMarkRead={(id) => store.markNotificationRead(id)}
+              onMarkAllRead={() => store.markAllNotificationsRead()}
+              onDelete={(id) => store.deleteNotification(id)}
             />
           )}
         </main>
