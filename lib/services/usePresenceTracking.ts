@@ -3,7 +3,7 @@ import { store } from '@/lib/services/store';
 import { isFirebaseConfigured, auth } from '@/lib/services/firebase';
 import { updateUser, updateUserPresence } from '@/lib/services/dbService';
 
-const HEARTBEAT_INTERVAL = 30 * 1000;        // 30s : heartbeat régulier
+const HEARTBEAT_INTERVAL = 5 * 60 * 1000;    // 5 min : heartbeat régulier (limite les écritures Firestore)
 const INACTIVITY_THRESHOLD = 10 * 60 * 1000; // 10 min sans activité → away
 const STALE_THRESHOLD = 15 * 60 * 1000;      // 15 min sans heartbeat → inactive (onglet fermé)
 const AWAY_CHECK_INTERVAL = 60 * 1000;       // Vérifier l'inactivité toutes les 60s
@@ -13,7 +13,7 @@ const AWAY_CHECK_INTERVAL = 60 * 1000;       // Vérifier l'inactivité toutes l
  *
  * PRINCIPE :
  * - L'user pointe manuellement (start/end workday) → c'est sa déclaration
- * - Si l'onglet est ouvert, on envoie un heartbeat toutes les 30s
+ * - Si l'onglet est ouvert, on envoie un heartbeat toutes les 5 min
  * - Si pas d'activité souris/clavier pendant 10 min → "away" (mais toujours en travail)
  * - Si pas de heartbeat pendant 15 min → "inactive" (onglet probablement fermé)
  * - Le temps de travail est "estimé" si inactivité détectée

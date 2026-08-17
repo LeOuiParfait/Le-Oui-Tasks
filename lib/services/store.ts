@@ -183,11 +183,26 @@ class AppStore {
       this.refreshTasks();
     }));
     
-    this.subs.push(db.subscribeObjectives(orgId, (items) => { this.objectives = items; this.notifyListeners(); }));
+    // Temps réel pour les données vues fréquemment (avec limit pour réduire les reads)
     this.subs.push(db.subscribeAttendance(orgId, currentUser.id, isSuperAdmin, (items) => { this.attendanceRecords = items; this.notifyListeners(); }));
     this.subs.push(db.subscribeNotifications(currentUser.id, (items) => { this.notifications = items; this.notifyListeners(); }));
-    this.subs.push(db.subscribeReports(orgId, (items) => { this.reports = items; this.notifyListeners(); }));
-    this.subs.push(db.subscribeWorkDayReports(orgId, (items) => { this.workDayReports = items; this.notifyListeners(); }));
+
+    // Chargement ponctuel pour les collections moins volatiles (réduction quota Firestore)
+    db.fetchObjectives(orgId).then((items) => {
+      if (this.orgId !== orgId) return
+      this.objectives = items
+      this.notifyListeners()
+    }).catch(() => {})
+    db.fetchReports(orgId).then((items) => {
+      if (this.orgId !== orgId) return
+      this.reports = items
+      this.notifyListeners()
+    }).catch(() => {})
+    db.fetchWorkDayReports(orgId).then((items) => {
+      if (this.orgId !== orgId) return
+      this.workDayReports = items
+      this.notifyListeners()
+    }).catch(() => {})
   }
 
   /** Tear down all Firestore subscriptions. */

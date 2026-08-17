@@ -11,6 +11,7 @@ import {
   where,
   and,
   or,
+  limit,
   onSnapshot,
   serverTimestamp,
   type Unsubscribe,
@@ -624,8 +625,8 @@ export async function fetchAttendance(orgId: string): Promise<AttendanceRecord[]
 export function subscribeAttendance(orgId: string, userId: string, isSuperAdmin: boolean, cb: (items: AttendanceRecord[]) => void): Unsubscribe {
   if (!isFirebaseConfigured) { cb([]); return () => {}; }
   const q = isSuperAdmin
-    ? query(collection(ensureDb(), COLLECTIONS.attendance), where('organizationId', '==', orgId))
-    : query(collection(ensureDb(), COLLECTIONS.attendance), and(where('organizationId', '==', orgId), where('userId', '==', userId)));
+    ? query(collection(ensureDb(), COLLECTIONS.attendance), where('organizationId', '==', orgId), limit(50))
+    : query(collection(ensureDb(), COLLECTIONS.attendance), and(where('organizationId', '==', orgId), where('userId', '==', userId)), limit(50));
   return onSnapshot(q, (snap) => cb(snap.docs.map((d) => mapAttendance(d.id, d.data()))), (error) => {
     console.error(`[Firestore] Error in subscription:`, error);
     cb([]); // Return empty array on error to prevent crashes
@@ -713,7 +714,7 @@ export async function fetchNotifications(userId: string): Promise<Notification[]
 
 export function subscribeNotifications(userId: string, cb: (items: Notification[]) => void): Unsubscribe {
   if (!isFirebaseConfigured) { cb([]); return () => {}; }
-  const q = query(collection(ensureDb(), COLLECTIONS.notifications), where('userId', '==', userId));
+  const q = query(collection(ensureDb(), COLLECTIONS.notifications), where('userId', '==', userId), limit(50));
   return onSnapshot(q, (snap) => cb(snap.docs.map((d) => mapNotification(d.id, d.data()))), (error) => {
     console.error(`[Firestore] Error in subscription:`, error);
     cb([]); // Return empty array on error to prevent crashes
@@ -756,7 +757,7 @@ export async function fetchComments(taskId: string): Promise<Comment[]> {
 
 export function subscribeComments(taskId: string, cb: (items: Comment[]) => void): Unsubscribe {
   if (!isFirebaseConfigured) { cb([]); return () => {}; }
-  const q = query(collection(ensureDb(), COLLECTIONS.comments), where('taskId', '==', taskId));
+  const q = query(collection(ensureDb(), COLLECTIONS.comments), where('taskId', '==', taskId), limit(50));
   return onSnapshot(q, (snap) => cb(snap.docs.map((d) => mapComment(d.id, d.data()))), (error) => {
     console.error(`[Firestore] Error in subscription:`, error);
     cb([]); // Return empty array on error to prevent crashes
