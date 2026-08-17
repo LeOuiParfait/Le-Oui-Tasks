@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { store } from '@/lib/services/store'
 import { useAuth } from '@/lib/services/AuthContext'
 import {
@@ -31,7 +32,7 @@ import { SettingsModal } from '@/components/settings/SettingsModal'
 import { canViewAllTasks, canViewTask } from '@/lib/services/permissions'
 import { usePresenceTracking } from '@/lib/services/usePresenceTracking'
 
-export function Workspace() {
+export function Workspace({ initialView }: { initialView: string }) {
   const { currentUser: authUser, organization, signOut, updateCurrentUser } = useAuth()
   // Keep Workspace currentUser in sync with store (which follows Firestore users)
   const [currentUser, setStoreCurrentUser] = useState<User | null>(store.getCurrentUser())
@@ -85,9 +86,26 @@ export function Workspace() {
   const isCurrentlyWorking = myTodayRecord?.status === 'working' || myTodayRecord?.status === 'on_break'
   usePresenceTracking(currentUser?.id, isCurrentlyWorking)
 
-  const [currentView, setCurrentView] = useState('kanban')
+  const currentView = initialView
 
-  const handleSetView = (view: string) => setCurrentView(view)
+  const viewToPath: Record<string, string> = {
+    kanban: '/',
+    mywork: '/mywork',
+    attendance: '/attendance',
+    projects: '/projects',
+    teams: '/teams',
+    reports: '/reports',
+    analytics: '/analytics',
+    notifications: '/notifications'
+  }
+
+  const router = useRouter()
+
+  const handleSetView = (view: string) => {
+    if (view === currentView) return
+    const path = viewToPath[view] || '/'
+    router.push(path)
+  }
   
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const selectedTask = useMemo(() => tasks.find((t) => t.id === selectedTaskId) || null, [tasks, selectedTaskId])
