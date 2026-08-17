@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: false,
   },
 
+  // Empêche le bundling de packages ESM sensibles côté serveur
+  serverExternalPackages: ['firebase-admin', 'jose', 'jwks-rsa'],
+
   // Set Turbopack root directory
   turbopack: {
     root: path.resolve(__dirname),
