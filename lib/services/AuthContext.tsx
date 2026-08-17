@@ -13,6 +13,7 @@ import {
   type SetupInput
 } from '@/lib/services/authService';
 import { isFirebaseConfigured, auth } from '@/lib/services/firebase';
+import { store } from '@/lib/services/store';
 
 interface AuthContextValue {
   firebaseUid: string | null;
@@ -151,6 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = useCallback(async () => {
     setLoading(true);
     try {
+      store.destroy();
       await signOutUser();
       setFirebaseUid(null);
       setCurrentUser(null);

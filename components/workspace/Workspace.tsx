@@ -59,9 +59,6 @@ export function Workspace({ initialView }: { initialView: string }) {
     if (authUser && organization) {
       store.init(organization.id, authUser, organization)
     }
-    return () => {
-      if (authUser) store.destroy()
-    }
   }, [authUser, organization])
 
   const [users, setUsers] = useState<User[]>(store.getUsers())

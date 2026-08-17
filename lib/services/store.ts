@@ -153,6 +153,9 @@ class AppStore {
   /** Initialize the store with Firestore subscriptions for the given organization. */
   init(orgId: string, currentUser: User, organization: Organization) {
     if (!isFirebaseConfigured) return;
+    if (this.initialized && this.orgId === orgId && this.currentUser?.id === currentUser.id) {
+      return;
+    }
 
     this.destroy();
     this.orgId = orgId;
