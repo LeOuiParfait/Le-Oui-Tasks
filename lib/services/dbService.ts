@@ -74,7 +74,13 @@ const COLLECTIONS = {
 function tsToIso(value: any): string | undefined {
   if (!value) return undefined;
   if (typeof value === 'string') return value;
-  if (value.toDate) return value.toDate().toISOString();
+  if (typeof value === 'number') return new Date(value).toISOString();
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value.toDate === 'function') return value.toDate().toISOString();
+  if (typeof value.seconds === 'number') {
+    const ms = value.seconds * 1000 + (value.nanoseconds || 0) / 1e6;
+    return new Date(ms).toISOString();
+  }
   return undefined;
 }
 
@@ -189,7 +195,7 @@ export function mapUser(id: string, data: DocumentData): User {
     jobTitle: data.jobTitle || '',
     presenceStatus: (data.presenceStatus as PresenceStatus) || 'offline',
     lastActiveAt: tsToIso(data.lastActiveAt) || new Date().toISOString(),
-    createdAt: tsToIso(data.createdAt) || new Date().toISOString()
+    createdAt: tsToIso(data.createdAt) || ''
   };
 }
 
@@ -282,7 +288,7 @@ export function mapTeam(id: string, data: DocumentData): Team {
     color: data.color || '#2563eb',
     managerId: data.managerId || '',
     memberIds: data.memberIds || [],
-    createdAt: tsToIso(data.createdAt) || new Date().toISOString()
+    createdAt: tsToIso(data.createdAt) || ''
   };
 }
 
@@ -350,7 +356,7 @@ export function mapProject(id: string, data: DocumentData): Project {
     startDate: data.startDate || new Date().toISOString().split('T')[0],
     dueDate: data.dueDate || new Date().toISOString().split('T')[0],
     weightedProgress: data.weightedProgress || 0,
-    createdAt: tsToIso(data.createdAt) || new Date().toISOString(),
+    createdAt: tsToIso(data.createdAt) || '',
     updatedAt: tsToIso(data.updatedAt) || new Date().toISOString()
   };
 }
@@ -442,7 +448,7 @@ export function mapTask(id: string, data: DocumentData): Task {
     attachments: data.attachments || [],
     memberIds: data.memberIds || [],
     teamIds: data.teamIds || [],
-    createdAt: tsToIso(data.createdAt) || new Date().toISOString(),
+    createdAt: tsToIso(data.createdAt) || '',
     updatedAt: tsToIso(data.updatedAt) || new Date().toISOString(),
     completedAt: tsToIso(data.completedAt),
     validatedAt: tsToIso(data.validatedAt),
@@ -548,7 +554,7 @@ export function mapObjective(id: string, data: DocumentData): Objective {
     deadline: data.deadline || new Date().toISOString().split('T')[0],
     status: data.status || 'on_track',
     linkedTaskIds: data.linkedTaskIds || [],
-    createdAt: tsToIso(data.createdAt) || new Date().toISOString()
+    createdAt: tsToIso(data.createdAt) || ''
   };
 }
 
@@ -658,7 +664,7 @@ export function mapWorkDayReport(id: string, data: DocumentData): WorkDayReport 
     status: data.status || 'draft',
     submittedAt: data.submittedAt || undefined,
     visibleTo: data.visibleTo || [],
-    createdAt: tsToIso(data.createdAt) || new Date().toISOString(),
+    createdAt: tsToIso(data.createdAt) || '',
     updatedAt: tsToIso(data.updatedAt) || new Date().toISOString()
   };
 }
@@ -694,7 +700,7 @@ export function mapNotification(id: string, data: DocumentData): Notification {
     message: data.message || '',
     link: data.link || undefined,
     read: data.read || false,
-    createdAt: tsToIso(data.createdAt) || new Date().toISOString()
+    createdAt: tsToIso(data.createdAt) || ''
   };
 }
 
@@ -736,7 +742,7 @@ export function mapComment(id: string, data: DocumentData): Comment {
     taskId: data.taskId || '',
     authorId: data.authorId || '',
     content: data.content || '',
-    createdAt: tsToIso(data.createdAt) || new Date().toISOString(),
+    createdAt: tsToIso(data.createdAt) || '',
     attachments: data.attachments || undefined
   };
 }

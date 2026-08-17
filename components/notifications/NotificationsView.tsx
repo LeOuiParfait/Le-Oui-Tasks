@@ -65,7 +65,9 @@ export function NotificationsView({
                     {n.title}
                   </h3>
                   <span className="text-xs text-stone-400 whitespace-nowrap">
-                    {new Date(n.createdAt).toLocaleString('fr-FR')}
+                    {n.createdAt && !Number.isNaN(Date.parse(n.createdAt))
+                      ? new Date(n.createdAt).toLocaleString('fr-FR')
+                      : '—'}
                   </span>
                 </div>
                 <p className="text-sm text-stone-600 mt-1">{n.message}</p>

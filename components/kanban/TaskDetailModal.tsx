@@ -59,7 +59,11 @@ const CommentRow: React.FC<{
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs font-bold text-stone-900">{author?.firstName} {author?.lastName}</span>
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-stone-400">{new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <span className="text-[10px] text-stone-400">
+              {comment.createdAt && !Number.isNaN(Date.parse(comment.createdAt))
+                ? new Date(comment.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                : '—'}
+            </span>
             {canEdit && !editing && (
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={() => setEditing(true)} className="p-1 rounded text-stone-400 hover:text-stone-900 hover:bg-stone-100">
