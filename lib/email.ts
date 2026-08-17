@@ -34,7 +34,11 @@ export async function sendEmail(to: string, subject: string, message: string, ac
     host: smtpHost,
     port: smtpPort,
     secure: smtpPort === 465,
-    auth: { user: smtpUser, pass: smtpPass }
+    requireTLS: smtpPort === 587,
+    auth: { user: smtpUser, pass: smtpPass },
+    tls: {
+      rejectUnauthorized: false
+    }
   })
 
   const actionButton = actionUrl && actionLabel ? `
@@ -83,10 +87,16 @@ export async function sendEmail(to: string, subject: string, message: string, ac
     </html>
   `
 
-  await transporter.sendMail({
-    from: `"LE LOUI PARFAIT" <${fromEmail}>`,
-    to,
-    subject,
-    html
-  })
+  try {
+    const info = await transporter.sendMail({
+      from: `"LE LOUI PARFAIT" <${fromEmail}>`,
+      to,
+      subject,
+      html
+    })
+    console.log('[Email] Sent:', info.messageId)
+  } catch (err: any) {
+    console.error('[Email] Failed to send:', err.message || err)
+    throw err
+  }
 }

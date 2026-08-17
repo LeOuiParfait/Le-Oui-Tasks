@@ -5,6 +5,19 @@ import { getStorage } from 'firebase-admin/storage'
 
 let adminApp: App | null = null
 
+function formatPrivateKey(key: string | undefined): string | null {
+  if (!key) return null
+  let formatted = key.replace(/\\n/g, '\n').trim()
+  if ((formatted.startsWith('"') && formatted.endsWith('"')) ||
+      (formatted.startsWith("'") && formatted.endsWith("'"))) {
+    formatted = formatted.slice(1, -1)
+  }
+  if (!formatted.includes('-----BEGIN PRIVATE KEY-----')) {
+    return null
+  }
+  return formatted
+}
+
 export function getAdminApp() {
   if (adminApp) return adminApp
 
@@ -16,17 +29,30 @@ export function getAdminApp() {
   }
 
   const projectId = process.env.FIREBASE_PROJECT_ID
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+  const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY
+  const privateKey = formatPrivateKey(rawPrivateKey)
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL
 
-  if (!projectId || !privateKey || !clientEmail) {
-    throw new Error('Firebase Admin SDK credentials missing')
+  const missing: string[] = []
+  if (!projectId) missing.push('FIREBASE_PROJECT_ID')
+  if (!privateKey) missing.push('FIREBASE_PRIVATE_KEY (absente ou malformée)')
+  if (!clientEmail) missing.push('FIREBASE_CLIENT_EMAIL')
+
+  if (missing.length > 0) {
+    const msg = `Firebase Admin SDK credentials missing: ${missing.join(', ')}`
+    console.error('[FirebaseAdmin]', msg)
+    throw new Error(msg)
   }
 
-  adminApp = initializeApp({
-    credential: cert({ projectId, privateKey, clientEmail }),
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
-  })
+  try {
+    adminApp = initializeApp({
+      credential: cert({ projectId, privateKey, clientEmail }),
+      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    })
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] Failed to initialize:', err.message || err)
+    throw err
+  }
 
   return adminApp
 }
