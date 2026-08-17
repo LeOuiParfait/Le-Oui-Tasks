@@ -23,6 +23,16 @@ export async function POST(request: NextRequest) {
       const userRecord = await auth.getUserByEmail(email)
       uid = userRecord.uid
       console.log('[ForgotPassword] Found user:', userRecord.uid)
+
+      // Vérifier que l'e-mail est bien associé à un compte dans l'application
+      const userDocs = await db.collection('users').where('email', '==', email).limit(1).get()
+      if (userDocs.empty) {
+        console.log('[ForgotPassword] No application account for:', email)
+        return NextResponse.json({
+          success: true,
+          message: 'Si cet e-mail existe, un lien de réinitialisation a été envoyé.'
+        })
+      }
     } catch (userErr: any) {
       // SÉCURITÉ : Message générique pour éviter l'énumération d'utilisateurs
       console.log('[ForgotPassword] User not found or lookup error:', userErr.code || userErr.message)
