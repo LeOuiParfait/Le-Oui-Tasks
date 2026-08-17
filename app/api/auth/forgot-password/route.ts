@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       throw dbErr
     }
 
-    const link = `${appUrl}/reset-password#token=${token}`
+    const link = `${appUrl}/reset-password?flow=forgot#token=${token}`
 
     try {
       console.log('[ForgotPassword] Sending email to:', email)

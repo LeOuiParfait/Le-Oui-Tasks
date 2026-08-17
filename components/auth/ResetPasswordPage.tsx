@@ -4,9 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Lock, Check, AlertCircle, Loader2, Eye, EyeOff, ArrowRight, Mail } from 'lucide-react';
 
-// BrandLogo - logo horizontal en couleurs d'origine
-const BrandLogo = ({ className = 'h-24' }: { className?: string }) => (
-  <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className={className} />
+// BrandLogo - logo horizontal en couleurs d'origine (même taille que la page login)
+const BrandLogo: React.FC<{ className?: string }> = ({ className = '' }) => (
+  <img src="/logo-horizontal.png" alt="LE LOUI PARFAIT" className={`h-20 w-auto ${className}`} />
 );
 
 // Vidéo d'arrière-plan (identique aux pages Auth)
@@ -28,6 +28,11 @@ const AuthVideoBackground = () => (
 export const ResetPasswordPage: React.FC = () => {
   const searchParams = useSearchParams();
   const router = useRouter();
+
+  // flow=activate : création/activation de compte
+  // flow=forgot : mot de passe oublié
+  const flow = searchParams.get('flow') || 'activate';
+  const isActivation = flow === 'activate';
 
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
@@ -129,19 +134,17 @@ export const ResetPasswordPage: React.FC = () => {
     }
   };
 
-  // État : chargement (panneau plein écran centré)
+  // État : chargement
   if (loading) {
     return (
       <div className="min-h-screen flex">
-        {/* Panneau gauche - vidéo */}
         <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center overflow-hidden">
           <AuthVideoBackground />
           <div className="relative z-10 text-center px-12">
-            <BrandLogo className="h-14 mx-auto mb-6" />
-            <p className="text-white/80 text-sm">Vérification de votre lien...</p>
+            <BrandLogo className="h-24" />
+            <p className="text-white/80 text-sm mt-6">Vérification de votre lien...</p>
           </div>
         </div>
-        {/* Panneau droit - contenu */}
         <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-stone-50">
           <div className="w-full max-w-md">
             <div className="flex flex-col items-center gap-4">
@@ -161,8 +164,8 @@ export const ResetPasswordPage: React.FC = () => {
         <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center overflow-hidden">
           <AuthVideoBackground />
           <div className="relative z-10 text-center px-12">
-            <BrandLogo className="h-14 mx-auto mb-6" />
-            <p className="text-white/80 text-sm">Espace de travail collaboratif</p>
+            <BrandLogo className="h-24" />
+            <p className="text-white/80 text-sm mt-6">Espace de travail collaboratif</p>
           </div>
         </div>
         <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-stone-50">
@@ -191,8 +194,10 @@ export const ResetPasswordPage: React.FC = () => {
         <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center overflow-hidden">
           <AuthVideoBackground />
           <div className="relative z-10 text-center px-12">
-            <BrandLogo className="h-14 mx-auto mb-6" />
-            <p className="text-white/80 text-sm">Compte activé avec succès</p>
+            <BrandLogo className="h-24" />
+            <p className="text-white/80 text-sm mt-6">
+              {isActivation ? 'Compte activé avec succès' : 'Mot de passe mis à jour'}
+            </p>
           </div>
         </div>
         <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-stone-50">
@@ -200,9 +205,13 @@ export const ResetPasswordPage: React.FC = () => {
             <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-4">
               <Check className="w-8 h-8 text-emerald-600" />
             </div>
-            <h1 className="text-2xl font-bold text-stone-900 mb-2">Mot de passe créé !</h1>
+            <h1 className="text-2xl font-bold text-stone-900 mb-2">
+              {isActivation ? 'Mot de passe créé !' : 'Mot de passe réinitialisé !'}
+            </h1>
             <p className="text-stone-600 mb-6">
-              Votre compte est prêt. Vous allez être redirigé vers l'espace de travail.
+              {isActivation
+                ? 'Votre compte est prêt. Vous allez être redirigé vers l\'espace de travail.'
+                : 'Votre mot de passe a été mis à jour. Vous allez être redirigé vers la connexion.'}
             </p>
             <div className="flex items-center justify-center gap-2 text-brand">
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -217,49 +226,49 @@ export const ResetPasswordPage: React.FC = () => {
   // État : formulaire principal
   return (
     <div className="min-h-screen flex">
-      {/* Panneau gauche - vidéo + branding (identique aux pages Auth) */}
       <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center overflow-hidden">
         <AuthVideoBackground />
         <div className="relative z-10 text-center px-12">
-          <BrandLogo className="h-16 mx-auto mb-6" />
-          <p className="text-white/80 text-sm leading-relaxed max-w-sm mx-auto">
-            Votre espace de travail collaboratif. Définissez votre mot de passe pour accéder à votre compte.
+          <BrandLogo className="h-24" />
+          <p className="text-white/80 text-sm leading-relaxed max-w-sm mx-auto mt-6">
+            {isActivation
+              ? 'Votre espace de travail collaboratif. Définissez votre mot de passe pour accéder à votre compte.'
+              : 'Votre espace de travail collaboratif. Créez un nouveau mot de passe pour retrouver l\'accès à votre compte.'}
           </p>
         </div>
       </div>
 
-      {/* Panneau droit - formulaire */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-8 bg-stone-50">
         <div className="w-full max-w-md">
-          {/* Logo mobile (visible seulement sur petits écrans) */}
           <div className="lg:hidden flex justify-center mb-6">
-            <BrandLogo className="h-10" />
+            <BrandLogo />
           </div>
 
-          {/* Header */}
           <div className="text-center mb-6">
             <h1 className="text-2xl font-bold text-stone-900 mb-2 tracking-tight">
-              Bienvenue
+              {isActivation ? 'Bienvenue' : 'Mot de passe oublié'}
             </h1>
             <p className="text-stone-600 text-sm leading-relaxed">
-              Votre compte a été créé. Définissez maintenant votre mot de passe pour accéder à votre espace de travail.
+              {isActivation
+                ? 'Votre compte a été créé. Définissez maintenant votre mot de passe pour accéder à votre espace de travail.'
+                : 'Saisissez un nouveau mot de passe sécurisé pour retrouver l\'accès à votre espace de travail.'}
             </p>
           </div>
 
-          {/* Info compte */}
           {email && (
             <div className="flex items-center gap-3 p-3 bg-white border border-stone-200 rounded-xl mb-6">
               <div className="w-9 h-9 rounded-full bg-brand/10 flex items-center justify-center shrink-0">
                 <Mail className="w-4 h-4 text-brand" />
               </div>
               <div className="min-w-0">
-                <p className="text-[11px] text-stone-500 uppercase tracking-wide font-semibold">Compte à activer</p>
+                <p className="text-[11px] text-stone-500 uppercase tracking-wide font-semibold">
+                  {isActivation ? 'Compte à activer' : 'Compte concerné'}
+                </p>
                 <p className="text-sm text-stone-900 font-medium truncate">{email}</p>
               </div>
             </div>
           )}
 
-          {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 flex items-start gap-2">
@@ -278,7 +287,7 @@ export const ResetPasswordPage: React.FC = () => {
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="w-full px-4 py-3 border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition-all"
-                  placeholder="Minimum 6 caractères"
+                  placeholder="Minimum 8 caractères"
                   disabled={verifying}
                 />
                 <button
@@ -313,11 +322,11 @@ export const ResetPasswordPage: React.FC = () => {
               {verifying ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Création en cours...</span>
+                  <span>{isActivation ? 'Activation en cours...' : 'Mise à jour...'}</span>
                 </>
               ) : (
                 <>
-                  <span>Activer mon compte</span>
+                  <span>{isActivation ? 'Activer mon compte' : 'Réinitialiser mon mot de passe'}</span>
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </>
               )}

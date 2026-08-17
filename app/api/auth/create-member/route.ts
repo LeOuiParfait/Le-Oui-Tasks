@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
       expiresAt: expiresAt.toISOString()
     })
 
-    const link = `${appUrl}/reset-password#token=${token}`
+    const link = `${appUrl}/reset-password?flow=activate#token=${token}`
 
     try {
       await sendEmail(
