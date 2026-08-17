@@ -114,7 +114,7 @@ export const ResetPasswordPage: React.FC = () => {
       const response = await fetch(`${origin}/api/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, newPassword })
+        body: JSON.stringify({ token, password: newPassword })
       });
       const data = await response.json();
 
