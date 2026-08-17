@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
 import { store } from '@/lib/services/store'
 import { useAuth } from '@/lib/services/AuthContext'
 import {
@@ -34,9 +33,6 @@ import { usePresenceTracking } from '@/lib/services/usePresenceTracking'
 
 export function Workspace() {
   const { currentUser: authUser, organization, signOut, updateCurrentUser } = useAuth()
-  const router = useRouter()
-  const pathname = usePathname()
-
   // Keep Workspace currentUser in sync with store (which follows Firestore users)
   const [currentUser, setStoreCurrentUser] = useState<User | null>(store.getCurrentUser())
   
@@ -77,46 +73,21 @@ export function Workspace() {
   const [workDayReports, setWorkDayReports] = useState<WorkDayReport[]>(store.getWorkDayReports())
 
   // Suivi de présence intelligent (heartbeat + inactivité + beforeunload)
-  const today = new Date().toISOString().split('T')[0]
-  const myTodayRecord = attendanceRecords.find((r) => r.userId === currentUser?.id && r.date === today)
+  const [today, setToday] = useState<string | null>(null)
+
+  useEffect(() => {
+    setToday(new Date().toISOString().split('T')[0])
+  }, [])
+
+  const myTodayRecord = today
+    ? attendanceRecords.find((r) => r.userId === currentUser?.id && r.date === today)
+    : undefined
   const isCurrentlyWorking = myTodayRecord?.status === 'working' || myTodayRecord?.status === 'on_break'
   usePresenceTracking(currentUser?.id, isCurrentlyWorking)
 
-  const pathToView: Record<string, string> = {
-    '/': 'kanban',
-    '/kanban': 'kanban',
-    '/mywork': 'mywork',
-    '/attendance': 'attendance',
-    '/projects': 'projects',
-    '/teams': 'teams',
-    '/reports': 'reports',
-    '/analytics': 'analytics',
-    '/notifications': 'notifications'
-  }
-  
-  const viewToPath: Record<string, string> = {
-    'kanban': '/',
-    'mywork': '/mywork',
-    'attendance': '/attendance',
-    'projects': '/projects',
-    'teams': '/teams',
-    'reports': '/reports',
-    'analytics': '/analytics',
-    'notifications': '/notifications'
-  }
-  
-  const [currentView, setCurrentView] = useState<string>(pathToView[pathname] || 'kanban')
+  const [currentView, setCurrentView] = useState('kanban')
 
-  useEffect(() => {
-    const view = pathToView[pathname] || 'kanban'
-    if (view !== currentView) setCurrentView(view)
-  }, [pathname])
-
-  const handleSetView = (view: string) => {
-    setCurrentView(view)
-    const path = viewToPath[view] || '/'
-    if (pathname !== path) router.push(path)
-  }
+  const handleSetView = (view: string) => setCurrentView(view)
   
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const selectedTask = useMemo(() => tasks.find((t) => t.id === selectedTaskId) || null, [tasks, selectedTaskId])
@@ -139,8 +110,6 @@ export function Workspace() {
     return unsubscribe
   }, [])
 
-  const todayStr = new Date().toISOString().split('T')[0]
-  const myTodayAttendance = attendanceRecords.find((r) => r.userId === currentUser?.id && r.date === todayStr)
 
   const viewTitles: Record<string, string> = {
     kanban: 'Toutes les Tâches',
@@ -190,7 +159,7 @@ export function Workspace() {
           title={viewTitles[currentView] || 'Toutes les Tâches'}
           users={users}
           currentUser={currentUser}
-          attendanceRecord={myTodayAttendance}
+          attendanceRecord={myTodayRecord}
           onStartWorkday={() => store.startWorkday()}
           onEndWorkday={() => store.endWorkday()}
           onToggleBreak={() => store.toggleBreak()}
@@ -228,7 +197,7 @@ export function Workspace() {
               currentUser={currentUser}
               tasks={visibleTasks}
               objectives={objectives}
-              attendanceRecord={myTodayAttendance}
+              attendanceRecord={myTodayRecord}
               onOpenTaskDetail={(t) => setSelectedTaskId(t.id)}
               onUpdateTaskStatus={(taskId, status) => store.updateTaskStatus(taskId, status)}
               onStartWorkday={() => store.startWorkday()}
